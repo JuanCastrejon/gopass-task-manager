@@ -246,12 +246,17 @@ La alternativa (`controllers/`, `services/`, `repositories/` en la raíz, con to
 
 ### ADR-018 — Flechas de transición, no un desplegable de estado
 
+> **Revisado por ADR-020 y ADR-021.** El tamaño de estos botones se corrigió tras medirlo en un
+> móvil, y el arrastre acabó entrando cuando quedó claro que un retardo de activación lo separa del
+> gesto de desplazar. Las flechas no se sustituyeron: son la alternativa de un solo puntero que
+> exige WCAG 2.5.7, y lo que este ADR decidió sobre ellas sigue vigente.
+
+
 **Contexto.** El tablero necesita una forma de mover una tarjeta entre columnas. El drag & drop está descartado por coste y accesibilidad.
 **Decisión.** Dos botones de flecha en el pie de la tarjeta, habilitados solo para las transiciones válidas: `TODO` solo avanza, `DONE` solo retrocede, `IN_PROGRESS` va en ambos sentidos.
 **Alternativa.** Un `<select>` de estado en cada tarjeta. Se descarta porque **la columna ya dice cuál es el estado actual**: repetirlo en un desplegable es información redundante ocupando el ancho de una tarjeta estrecha. Lo que no es redundante es la *transición*, y eso es justo lo que comunica una flecha, en un solo clic y sin abrir nada encima.
 **Accesibilidad.** Son `<button>` nativos con `aria-label` que nombra la tarea y el destino («Mover "Homologar lectores TAG" a En curso»).
 **Detalle que nadie ve hasta que navega con teclado.** Al moverse, la tarjeta se desmonta de una columna y se monta en otra: el botón que tenía el foco desaparece y el foco caería al `body`. La tarjeta recién movida se enfoca a sí misma al montarse para que quien usa teclado no pierda el punto de referencia.
-**Revisado.** El tamaño de estos botones se corrigió después de medirlo en un móvil: ver ADR-020. La decisión de fondo —control explícito en vez de arrastre— se mantiene, y ahí está la razón medida.
 
 ### ADR-005 (matiz) — Escribir la respuesta confirmada en la caché no es optimismo
 
@@ -267,7 +272,11 @@ La alternativa (`controllers/`, `services/`, `repositories/` en la raíz, con to
 **Por qué en la URL.** Un tablero filtrado se puede compartir por enlace y sobrevive a una recarga. El coste fue mínimo porque el router propio ya usa `useSyncExternalStore`: bastó con incluir `location.search` en la instantánea. Se usa `replaceState` y no `pushState` para que teclear en el buscador no llene el historial.
 **Consecuencia.** Los filtros se aplican en SQL, no sobre un array ya descargado, y una columna sin coincidencias distingue «Sin tareas que coincidan» de «Sin tareas».
 
-### ADR-020 — Objetivos táctiles de 44 px, y por qué el tablero sigue sin arrastre
+### ADR-020 — Objetivos táctiles de 44 px, y el conflicto del arrastre con el carrusel
+
+> **Revisado por ADR-021.** El arrastre acabó entrando. Lo que este ADR mide sobre el conflicto
+> con el carrusel sigue siendo cierto; lo que le faltaba era que un retardo de activación separa los
+> dos gestos. Los objetivos de 44 px se mantienen y son ahora la alternativa que exige WCAG 2.5.7.
 
 **Contexto.** Al revisar la aplicación en un móvil apareció una fricción real: los controles de la
 tarjeta —editar, borrar y las dos flechas de transición— miden **28×32 px**. Cumplen el mínimo de
@@ -303,10 +312,6 @@ funciona, pero duplica lo que la flecha ya hace en uno.
 **Relación con ADR-018.** No lo sustituye: lo confirma con evidencia que en su momento no se tenía.
 ADR-018 descartó el arrastre por coste y accesibilidad; esta revisión mide el coste ergonómico real
 de su alternativa y lo corrige, sin cambiar la decisión de fondo.
-
-**Revisado por ADR-021.** El arrastre acabó entrando. Lo que este ADR mide sobre el conflicto con
-el carrusel sigue siendo cierto; lo que le faltaba era que un retardo de activación separa los dos
-gestos. Los objetivos de 44 px se mantienen y son ahora la alternativa que exige WCAG 2.5.7.
 
 ### ADR-021 — Arrastre de tarjetas, encima de las flechas y no en su lugar
 
