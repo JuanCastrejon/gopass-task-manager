@@ -55,11 +55,11 @@ export function TaskCard({ task, pending, autoFocus, onMove, onEdit, onDelete }:
         <h4 className={`text-sm ${task.status === 'DONE' ? 'text-ink-muted line-through' : ''}`}>
           {task.title}
         </h4>
-        <div className="flex shrink-0 gap-0.5">
-          <Button variant="ghost" size="sm" className="size-7 px-0" onClick={onEdit} aria-label={`Editar ${task.title}`}>
+        <div className="flex shrink-0 gap-0.5 pointer-coarse:gap-1">
+          <Button variant="ghost" size="sm" className="size-7 px-0 pointer-coarse:size-11" onClick={onEdit} aria-label={`Editar ${task.title}`}>
             <Pencil className="size-3" aria-hidden />
           </Button>
-          <Button variant="ghost" size="sm" className="size-7 px-0" onClick={onDelete} aria-label={`Eliminar ${task.title}`}>
+          <Button variant="ghost" size="sm" className="size-7 px-0 pointer-coarse:size-11" onClick={onDelete} aria-label={`Eliminar ${task.title}`}>
             <Trash2 className="size-3" aria-hidden />
           </Button>
         </div>
@@ -74,14 +74,14 @@ export function TaskCard({ task, pending, autoFocus, onMove, onEdit, onDelete }:
           <Button
             variant="ghost"
             size="sm"
-            className="size-7 px-0"
+            className="size-7 px-0 pointer-coarse:size-11"
             onClick={() => onMove(anterior)}
             aria-label={`Mover "${task.title}" a ${STATUS_LABEL[anterior]}`}
           >
             <ArrowLeft className="size-3.5" aria-hidden />
           </Button>
         ) : (
-          <span className="size-7" />
+          <span className="size-7 pointer-coarse:size-11" />
         )}
 
         <PriorityBadge priority={task.priority} />
@@ -90,14 +90,14 @@ export function TaskCard({ task, pending, autoFocus, onMove, onEdit, onDelete }:
           <Button
             variant="ghost"
             size="sm"
-            className="size-7 px-0"
+            className="size-7 px-0 pointer-coarse:size-11"
             onClick={() => onMove(siguiente)}
             aria-label={`Mover "${task.title}" a ${STATUS_LABEL[siguiente]}`}
           >
             <ArrowRight className="size-3.5" aria-hidden />
           </Button>
         ) : (
-          <span className="size-7" />
+          <span className="size-7 pointer-coarse:size-11" />
         )}
       </div>
     </article>

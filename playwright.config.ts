@@ -1,6 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
+ * El puerto no está fijo: si `WEB_PORT` cambia, los E2E siguen apuntando al
+ * sitio correcto. `E2E_BASE_URL` permite además correrlos contra un despliegue
+ * que no esté en localhost. En CI no hace falta ninguna de las dos: se usan
+ * los valores por defecto.
+ */
+const baseURL =
+  process.env['E2E_BASE_URL'] ?? `http://localhost:${process.env['WEB_PORT'] ?? '5173'}`;
+
+/**
  * Los E2E viven en la raíz porque ejercitan el sistema entero —navegador,
  * proxy de Vite, Express y PostgreSQL—, no solo `web/`.
  *
@@ -18,7 +27,7 @@ export default defineConfig({
   timeout: 30_000,
   reporter: process.env['CI'] ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
@@ -29,7 +38,7 @@ export default defineConfig({
     command: 'npm run dev',
     // `localhost` y no `127.0.0.1`: en Windows, Vite se ata a `::1` y una
     // sonda contra la IPv4 nunca responde.
-    url: 'http://localhost:5173',
+    url: baseURL,
     reuseExistingServer: !process.env['CI'],
     timeout: 90_000,
     stdout: 'pipe',

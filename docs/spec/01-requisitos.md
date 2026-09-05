@@ -38,7 +38,7 @@ No se implementa, y la razón se documenta:
 |---|---|
 | Fecha de vencimiento (RF-14) | Ni la columna ni el badge. Se descartó la variante intermedia —columna en el esquema, UI para después— porque una columna que nadie escribe y que la API devuelve siempre como `null` comunica alcance abandonado, y porque añadirla más tarde es una operación de catálogo instantánea: no hay nada que "preparar". Entra completa o no entra. |
 | Autenticación, usuarios, roles, permisos | No está en el enunciado. Introduce un modelo de identidad completo que desplazaría trabajo de calidad sobre lo que sí se pidió. |
-| Drag & drop entre columnas | Alto coste (accesibilidad, estado optimista, reordenamiento persistente) para señal puramente visual. El cambio de estado con un control explícito es más fiable y más accesible. |
+| Drag & drop entre columnas | Alto coste (accesibilidad, estado optimista, reordenamiento persistente) para señal puramente visual. El cambio de estado con un control explícito es más fiable y más accesible. Revisado con la aplicación en la mano: por debajo de `lg` el tablero es un carrusel con anclaje, y arrastrar una tarjeta es el mismo gesto que desplazarlo. Lo que sí se corrigió es el tamaño de los controles. Ver ADR-020. |
 | Soft delete / auditoría | No hay requisito de trazabilidad. Contamina toda consulta con `WHERE deleted_at IS NULL`. Se documenta cuándo sí se haría. |
 | Paginación | Con volumen de demostración añade complejidad sin señal. Se documenta el umbral a partir del cual sería obligatoria. |
 | Orden manual de tareas | Requiere índice flotante o lista enlazada y una API de reordenamiento. Fuera de alcance. |

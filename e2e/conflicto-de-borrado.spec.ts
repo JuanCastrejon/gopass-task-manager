@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './limpieza.js';
 
 /**
  * Escenario 2 — el 409 explicado.

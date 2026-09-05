@@ -16,10 +16,18 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
     // quedan alineadas aunque unas tengan descripción y otras no.
     <article className="flex flex-col rounded-xl border border-border bg-surface p-5 transition hover:border-brand/40">
       <div className="flex items-start justify-between gap-3">
-        <h3 className="truncate text-sm font-semibold" title={project.name}>
+        {/* `truncate` implica `white-space: nowrap`, así que el `min-content`
+            de este título es su ancho completo: 248 px con el más largo del
+            seed. `min-w-0` deja que el h3 encoja dentro de la tarjeta, pero no
+            reduce lo que aporta al `min-content` de la rejilla; para eso las
+            rejillas declaran `grid-cols-1` —`repeat(1, minmax(0, 1fr))`— en
+            lugar de dejar la columna implícita en `auto`. Sin las dos cosas,
+            a 320 px la tarjeta medía 372 px y el panel entero scrolleaba en
+            horizontal. */}
+        <h3 className="min-w-0 truncate text-sm font-semibold" title={project.name}>
           {project.name}
         </h3>
-        <div className="flex shrink-0 gap-0.5">
+        <div className="flex shrink-0 gap-0.5 pointer-coarse:gap-1">
           <Button variant="ghost" size="sm" onClick={() => setEditando(true)} aria-label={`Editar ${project.name}`}>
             <Pencil className="size-3.5" aria-hidden />
           </Button>
