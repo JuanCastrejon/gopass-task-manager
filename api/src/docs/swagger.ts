@@ -20,7 +20,7 @@ export const openApiSpec = {
     '/health': {
       get: {
         tags: ['Health'],
-        summary: 'Verificar salud del sistema y persistencia',
+        summary: 'Verificar salud del sistema y persistencia (RF-15)',
         responses: {
           200: {
             description: 'Sistema operativo',
@@ -133,6 +133,14 @@ export const openApiSpec = {
               },
             },
           },
+          400: {
+            description: 'Identificador con formato inválido',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
           404: {
             description: 'Proyecto no encontrado',
             content: {
@@ -199,7 +207,7 @@ export const openApiSpec = {
       },
       delete: {
         tags: ['Projects'],
-        summary: 'Eliminar proyecto sin tareas (RF-05, RF-07)',
+        summary: 'Eliminar proyecto sin tareas (RF-05)',
         parameters: [
           {
             name: 'id',
@@ -210,6 +218,14 @@ export const openApiSpec = {
         ],
         responses: {
           204: { description: 'Proyecto eliminado exitosamente' },
+          400: {
+            description: 'Identificador con formato inválido',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
           404: {
             description: 'Proyecto no encontrado',
             content: {
@@ -232,7 +248,7 @@ export const openApiSpec = {
     '/projects/{projectId}/tasks': {
       get: {
         tags: ['Tasks'],
-        summary: 'Listar tareas de un proyecto con filtros (RF-08, RF-13)',
+        summary: 'Listar tareas de un proyecto con filtros (RF-11, RF-13)',
         parameters: [
           {
             name: 'projectId',
@@ -268,6 +284,14 @@ export const openApiSpec = {
                   type: 'array',
                   items: { $ref: '#/components/schemas/Task' },
                 },
+              },
+            },
+          },
+          400: {
+            description: 'Identificador o filtro con valor inválido',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
               },
             },
           },
@@ -331,7 +355,7 @@ export const openApiSpec = {
     '/tasks/{id}': {
       get: {
         tags: ['Tasks'],
-        summary: 'Obtener detalle de una tarea por ID (RF-09)',
+        summary: 'Obtener detalle de una tarea por ID',
         parameters: [
           {
             name: 'id',
@@ -349,6 +373,14 @@ export const openApiSpec = {
               },
             },
           },
+          400: {
+            description: 'Identificador con formato inválido',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
           404: {
             description: 'Tarea no encontrada',
             content: {
@@ -361,7 +393,7 @@ export const openApiSpec = {
       },
       patch: {
         tags: ['Tasks'],
-        summary: 'Actualizar tarea: estado, prioridad, título o proyecto (RF-10, RF-14)',
+        summary: 'Actualizar tarea: estado, prioridad, título o proyecto (RF-09, RF-10)',
         parameters: [
           {
             name: 'id',
@@ -407,7 +439,7 @@ export const openApiSpec = {
       },
       delete: {
         tags: ['Tasks'],
-        summary: 'Eliminar una tarea por ID (RF-11)',
+        summary: 'Eliminar una tarea por ID (RF-10)',
         parameters: [
           {
             name: 'id',
@@ -418,6 +450,14 @@ export const openApiSpec = {
         ],
         responses: {
           204: { description: 'Tarea eliminada exitosamente' },
+          400: {
+            description: 'Identificador con formato inválido',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
           404: {
             description: 'Tarea no encontrada',
             content: {
@@ -432,7 +472,7 @@ export const openApiSpec = {
     '/stats': {
       get: {
         tags: ['Stats'],
-        summary: 'Obtener métricas globales del sistema',
+        summary: 'Obtener métricas globales del sistema (RF-12)',
         responses: {
           200: {
             description: 'Métricas analíticas consolidadas',

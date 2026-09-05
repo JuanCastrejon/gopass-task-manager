@@ -1,0 +1,29 @@
+schema: greenfield-sdd
+
+context: |
+  GoPass Task Manager: gestor de tareas por proyectos construido para la prueba técnica de
+  GoPass (peajes, parqueaderos y pagos). React 18 + Express + PostgreSQL 16, TypeScript estricto
+  de punta a punta, arranque con `docker compose up --build`.
+
+  La fuente de verdad de los requisitos es `docs/spec/01-requisitos.md` (RF-01..RF-16 con
+  criterio de aceptación verificable) y su matriz de trazabilidad en
+  `docs/spec/05-estrategia-calidad.md`. Los deltas de esta carpeta no los sustituyen: los
+  expresan como comportamiento observable para el flujo SDD.
+
+  Todo artefacto OpenSpec se escribe en español. Los identificadores de código van en inglés.
+  Flujo git del proyecto: `feat|fix|chore|docs/* -> develop -> main` mediante PR.
+
+rules:
+  research:
+    - Declarar la fuente de cada afirmación técnica. Lo medido contra PostgreSQL se cita con su salida.
+    - Separar hallazgos confirmados de inferencias.
+  proposal:
+    - Acotar el cambio a capacidades trazables y referenciar los RF que cubre.
+    - Declarar exclusiones de alcance cuando el requisito sea WON'T.
+  specs:
+    - Escenarios Given/When/Then, solo comportamiento observable o regla contractual.
+    - No inventar comportamiento: si no hay prueba que lo cubra, no se declara.
+  design:
+    - Explicar la decisión y la alternativa descartada, con su consecuencia.
+  tasks:
+    - Descomponer en tareas verificables con su validación explícita.

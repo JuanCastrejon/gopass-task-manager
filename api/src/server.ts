@@ -13,7 +13,7 @@ const server = app.listen(env.API_PORT, () => {
  */
 async function shutdown(signal: string): Promise<void> {
   console.log(`[api] ${signal} recibido, cerrando`);
-  server.close(() => void 0);
+  await new Promise<void>((resolve) => server.close(() => resolve()));
   await closePool();
   process.exit(0);
 }

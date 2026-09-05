@@ -70,6 +70,13 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Los E2E corren `npm run dev` contra `gopass_tasks`, que en el runner
+      # es una base vacia: fuera de Docker nadie aplica el esquema, porque
+      # quien lo hace es el entrypoint del contenedor. Las pruebas de API no
+      # lo destapan: cada worker migra su propia base `gopass_tasks_test_<n>`.
+      - name: Migrar la base que usan los E2E
+        run: npm --prefix api run migrate
+
       - name: Navegador para los E2E
         run: npx playwright install --with-deps chromium
 

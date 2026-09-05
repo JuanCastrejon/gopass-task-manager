@@ -7,7 +7,7 @@ set -e
 # asumirlo.
 echo "[api] aplicando migraciones"
 i=1
-until npx node-pg-migrate up; do
+until ./node_modules/.bin/node-pg-migrate up; do
   if [ "$i" -ge 10 ]; then
     echo "[api] las migraciones fallaron tras $i intentos" >&2
     exit 1

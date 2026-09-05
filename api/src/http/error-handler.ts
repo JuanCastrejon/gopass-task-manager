@@ -22,6 +22,7 @@ const TITLES: Record<ErrorCode, string> = {
   TASK_NOT_FOUND: 'Tarea no encontrada',
   PROJECT_NAME_TAKEN: 'Nombre de proyecto en uso',
   PROJECT_HAS_TASKS: 'El proyecto tiene tareas asociadas',
+  ROUTE_NOT_FOUND: 'Ruta no encontrada',
   INTERNAL_ERROR: 'Error interno',
 };
 
@@ -92,10 +93,10 @@ function toAppError(err: unknown): AppError {
 /** 404 uniforme para rutas inexistentes, en el mismo formato que el resto. */
 export function notFoundHandler(req: Request, res: Response): void {
   res.status(404).type('application/problem+json').json({
-    type: `${PROBLEM_BASE}/route-not-found`,
-    title: 'Ruta no encontrada',
+    type: `${PROBLEM_BASE}/${slug(ERROR_CODES.ROUTE_NOT_FOUND)}`,
+    title: TITLES[ERROR_CODES.ROUTE_NOT_FOUND],
     status: 404,
-    code: 'ROUTE_NOT_FOUND',
+    code: ERROR_CODES.ROUTE_NOT_FOUND,
     detail: `No existe ${req.method} ${req.originalUrl}.`,
     instance: req.originalUrl,
     requestId: req.requestId,
