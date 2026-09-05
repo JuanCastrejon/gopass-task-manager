@@ -1,0 +1,85 @@
+import { z } from 'zod';
+
+export const TASK_STATUSES = ['TODO', 'IN_PROGRESS', 'DONE'] as const;
+export const TASK_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH'] as const;
+
+export const taskIdParamsSchema = z.object({
+  id: z.string().uuid('El identificador debe ser un UUID.'),
+});
+
+export const projectScopedParamsSchema = z.object({
+  projectId: z.string().uuid('El identificador de proyecto debe ser un UUID.'),
+});
+
+/**
+ * `.strict()` en los esquemas de escritura.
+ *
+ * `completedAt` no se acepta: lo sella la base en la transición hacia `DONE`
+ * y la aplicación no lo escribe nunca. Zod por defecto **descarta en
+ * silencio** las claves desconocidas, así que sin `.strict()` un cliente que
+ * mandara `{"status":"DONE","completedAt":"2020-01-01"}` recibiría un 200 y
+ * creería que guardó esa fecha.
+ *
+ * El mismo mecanismo atrapa las erratas: `{"staus":"DONE"}` sería un parche
+ * vacío silencioso en vez de un 400 que dice qué pasa.
+ *
+ * No se aplica a `params` ni a `query`: ahí las claves de más las pone el
+ * navegador o el enrutador, no el cliente.
+ */
+const strictMessage = 'Campo no reconocido o de solo lectura.';
+
+export const createTaskSchema = z
+  .object({
+    title: z.string().trim().min(1, 'El título no puede estar vacío.').max(200, 'El título supera los 200 caracteres.'),
+    description: z.string().trim().max(5000).nullish(),
+    status: z.enum(TASK_STATUSES).optional(),
+    priority: z.enum(TASK_PRIORITIES).optional(),
+  })
+  .strict(strictMessage);
+
+export const patchTaskSchema = z
+  .object({
+    title: z.string().trim().min(1, 'El título no puede estar vacío.').max(200, 'El título supera los 200 caracteres.').optional(),
+    description: z.string().trim().max(5000).nullable().optional(),
+    status: z.enum(TASK_STATUSES).optional(),
+    priority: z.enum(TASK_PRIORITIES).optional(),
+    /**
+     * Reasignar la tarea a otro proyecto.
+     *
+     * Entra porque el 409 de borrado de proyecto dice que hay que eliminar o
+     * mover las tareas primero: sin esto, esa frase sería una promesa que la
+     * API no puede cumplir. Cuesta una entrada en el mapa de columnas y una
+     * rama en el `catch`, y reutiliza la traducción del `23503` que ya
+     * existe.
+     */
+    projectId: z.string().uuid('El identificador de proyecto debe ser un UUID.').optional(),
+  })
+  .strict(strictMessage)
+  .refine((body) => Object.keys(body).length > 0, {
+    message: 'Envía al menos un campo para actualizar.',
+  });
+
+/**
+ * Filtros del listado (RF-13). `z.preprocess` normaliza el hecho de que
+ * Express entrega un string cuando el parámetro aparece una vez y un array
+ * cuando se repite.
+ */
+const repeatable = <T extends readonly [string, ...string[]]>(values: T) =>
+  z
+    .preprocess(
+      (raw) => (raw === undefined ? undefined : Array.isArray(raw) ? raw : [raw]),
+      z.array(z.enum(values)).min(1, 'El filtro no puede ir vacío.'),
+    )
+    // Repetir el mismo valor no debería cambiar la consulta.
+    .transform((list) => [...new Set(list)])
+    .optional();
+
+export const listTasksQuerySchema = z.object({
+  status: repeatable(TASK_STATUSES),
+  priority: repeatable(TASK_PRIORITIES),
+  q: z.string().trim().min(1).max(200).optional(),
+});
+
+export type CreateTaskInput = z.infer<typeof createTaskSchema>;
+export type PatchTaskInput = z.infer<typeof patchTaskSchema>;
+export type ListTasksQuery = z.infer<typeof listTasksQuerySchema>;

@@ -13,6 +13,7 @@ export const openApiSpec = {
   tags: [
     { name: 'Health', description: 'Sondas de salud del sistema' },
     { name: 'Projects', description: 'Operaciones CRUD de proyectos y avance' },
+    { name: 'Tasks', description: 'Operaciones CRUD de tareas, estados y filtros' },
     { name: 'Stats', description: 'Métricas analíticas del panel' },
   ],
   paths: {
@@ -228,6 +229,206 @@ export const openApiSpec = {
         },
       },
     },
+    '/projects/{projectId}/tasks': {
+      get: {
+        tags: ['Tasks'],
+        summary: 'Listar tareas de un proyecto con filtros (RF-08, RF-13)',
+        parameters: [
+          {
+            name: 'projectId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+          {
+            name: 'status',
+            in: 'query',
+            description: 'Filtrar por estado (repetible)',
+            schema: { type: 'string', enum: ['TODO', 'IN_PROGRESS', 'DONE'] },
+          },
+          {
+            name: 'priority',
+            in: 'query',
+            description: 'Filtrar por prioridad (repetible)',
+            schema: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },
+          },
+          {
+            name: 'q',
+            in: 'query',
+            description: 'Búsqueda por texto en título',
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Listado de tareas coincidentes',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/Task' },
+                },
+              },
+            },
+          },
+          404: {
+            description: 'Proyecto no encontrado',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        tags: ['Tasks'],
+        summary: 'Crear tarea en un proyecto (RF-06)',
+        parameters: [
+          {
+            name: 'projectId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CreateTaskInput' },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: 'Tarea creada exitosamente',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Task' },
+              },
+            },
+          },
+          400: {
+            description: 'Payload inválido o campo completedAt no permitido',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+          404: {
+            description: 'Proyecto no encontrado',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/tasks/{id}': {
+      get: {
+        tags: ['Tasks'],
+        summary: 'Obtener detalle de una tarea por ID (RF-09)',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Detalle de la tarea',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Task' },
+              },
+            },
+          },
+          404: {
+            description: 'Tarea no encontrada',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+        },
+      },
+      patch: {
+        tags: ['Tasks'],
+        summary: 'Actualizar tarea: estado, prioridad, título o proyecto (RF-10, RF-14)',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PatchTaskInput' },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Tarea actualizada (con completedAt sellado si transicionó a DONE)',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Task' },
+              },
+            },
+          },
+          400: {
+            description: 'Payload inválido o campo completedAt no permitido',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+          404: {
+            description: 'Tarea no encontrada o proyecto destino inexistente',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+        },
+      },
+      delete: {
+        tags: ['Tasks'],
+        summary: 'Eliminar una tarea por ID (RF-11)',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          204: { description: 'Tarea eliminada exitosamente' },
+          404: {
+            description: 'Tarea no encontrada',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/stats': {
       get: {
         tags: ['Stats'],
@@ -287,6 +488,41 @@ export const openApiSpec = {
           description: { type: 'string', maxLength: 2000, nullable: true, example: null },
         },
       },
+      Task: {
+        type: 'object',
+        required: ['id', 'projectId', 'title', 'status', 'priority', 'completedAt', 'createdAt', 'updatedAt'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          projectId: { type: 'string', format: 'uuid' },
+          title: { type: 'string', example: 'Definir contrato de conciliación' },
+          description: { type: 'string', nullable: true, example: 'Especificación del protocolo' },
+          status: { type: 'string', enum: ['TODO', 'IN_PROGRESS', 'DONE'], example: 'IN_PROGRESS' },
+          priority: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'], example: 'HIGH' },
+          completedAt: { type: 'string', format: 'date-time', nullable: true, example: null },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      CreateTaskInput: {
+        type: 'object',
+        required: ['title'],
+        properties: {
+          title: { type: 'string', minLength: 1, maxLength: 200, example: 'Nueva tarea operativa' },
+          description: { type: 'string', maxLength: 5000, nullable: true, example: 'Detalle de la tarea' },
+          status: { type: 'string', enum: ['TODO', 'IN_PROGRESS', 'DONE'], default: 'TODO' },
+          priority: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'], default: 'MEDIUM' },
+        },
+      },
+      PatchTaskInput: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', minLength: 1, maxLength: 200 },
+          description: { type: 'string', maxLength: 5000, nullable: true },
+          status: { type: 'string', enum: ['TODO', 'IN_PROGRESS', 'DONE'] },
+          priority: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },
+          projectId: { type: 'string', format: 'uuid', description: 'Reasignar a otro proyecto' },
+        },
+      },
       Stats: {
         type: 'object',
         required: ['projects', 'tasks', 'done', 'progress', 'byStatus', 'byPriority'],
@@ -311,12 +547,12 @@ export const openApiSpec = {
         type: 'object',
         required: ['type', 'title', 'status', 'code', 'instance', 'requestId'],
         properties: {
-          type: { type: 'string', format: 'uri', example: 'https://gopass-task-manager.local/errors/project-has-tasks' },
-          title: { type: 'string', example: 'El proyecto tiene tareas asociadas' },
-          status: { type: 'integer', example: 409 },
-          code: { type: 'string', example: 'PROJECT_HAS_TASKS' },
-          detail: { type: 'string', example: 'No se puede eliminar un proyecto que todavía tiene tareas. Elimínalas primero.' },
-          instance: { type: 'string', example: '/api/projects/5b1f0a10-0000-4000-8000-000000000001' },
+          type: { type: 'string', format: 'uri', example: 'https://gopass-task-manager.local/errors/task-not-found' },
+          title: { type: 'string', example: 'Tarea no encontrada' },
+          status: { type: 'integer', example: 404 },
+          code: { type: 'string', example: 'TASK_NOT_FOUND' },
+          detail: { type: 'string', example: 'No existe una tarea con id ...' },
+          instance: { type: 'string', example: '/api/tasks/7c2e1b20-0000-4000-8000-000000000001' },
           requestId: { type: 'string', format: 'uuid', example: '8f7a94dc-8c46-4e5a-93f1-d00735dbdf55' },
           errors: {
             type: 'array',
@@ -324,8 +560,8 @@ export const openApiSpec = {
               type: 'object',
               required: ['path', 'message'],
               properties: {
-                path: { type: 'string', example: 'name' },
-                message: { type: 'string', example: 'El nombre no puede estar vacío.' },
+                path: { type: 'string', example: 'title' },
+                message: { type: 'string', example: 'El título no puede estar vacío.' },
               },
             },
           },
