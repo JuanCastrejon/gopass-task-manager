@@ -11,9 +11,17 @@ const VARIANTS: Record<Variant, string> = {
   danger: 'bg-danger-soft text-danger hover:brightness-95',
 };
 
+/**
+ * `pointer-coarse:` eleva la altura a 44 px (`h-11`) solo donde el puntero es
+ * un dedo. WCAG 2.2 SC 2.5.8 pide 24x24 como mínimo —que ya se cumplía— pero
+ * SC 2.5.5 y las guías de Apple piden 44x44, y medido en un móvil de 390 px
+ * los controles de la tarjeta quedaban en 28x32: legales y difíciles de
+ * acertar con el pulgar. En ratón se mantienen compactos: agrandarlos allí
+ * solo emborronaría la densidad de la interfaz.
+ */
 const SIZES: Record<Size, string> = {
-  sm: 'h-8 px-2.5 text-xs gap-1.5',
-  md: 'h-9 px-3.5 text-sm gap-2',
+  sm: 'h-8 px-2.5 text-xs gap-1.5 pointer-coarse:h-11',
+  md: 'h-9 px-3.5 text-sm gap-2 pointer-coarse:h-11',
 };
 
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -40,7 +48,11 @@ export function Button({
       // que un overlay tape la pantalla entera.
       disabled={disabled === true || loading}
       aria-busy={loading || undefined}
-      className={`inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-lg font-medium transition
+      // `touch-manipulation` quita el retardo de ~300 ms que el navegador
+      // reserva para detectar un doble toque. `active:scale` da la respuesta
+      // inmediata que en escritorio da el `hover` y en táctil no existe.
+      className={`inline-flex shrink-0 touch-manipulation items-center justify-center whitespace-nowrap
+        rounded-lg font-medium transition active:scale-[0.97]
         disabled:cursor-not-allowed disabled:opacity-60
         ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
       {...rest}

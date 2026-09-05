@@ -251,6 +251,7 @@ La alternativa (`controllers/`, `services/`, `repositories/` en la raíz, con to
 **Alternativa.** Un `<select>` de estado en cada tarjeta. Se descarta porque **la columna ya dice cuál es el estado actual**: repetirlo en un desplegable es información redundante ocupando el ancho de una tarjeta estrecha. Lo que no es redundante es la *transición*, y eso es justo lo que comunica una flecha, en un solo clic y sin abrir nada encima.
 **Accesibilidad.** Son `<button>` nativos con `aria-label` que nombra la tarea y el destino («Mover "Homologar lectores TAG" a En curso»).
 **Detalle que nadie ve hasta que navega con teclado.** Al moverse, la tarjeta se desmonta de una columna y se monta en otra: el botón que tenía el foco desaparece y el foco caería al `body`. La tarjeta recién movida se enfoca a sí misma al montarse para que quien usa teclado no pierda el punto de referencia.
+**Revisado.** El tamaño de estos botones se corrigió después de medirlo en un móvil: ver ADR-020. La decisión de fondo —control explícito en vez de arrastre— se mantiene, y ahí está la razón medida.
 
 ### ADR-005 (matiz) — Escribir la respuesta confirmada en la caché no es optimismo
 
@@ -265,6 +266,43 @@ La alternativa (`controllers/`, `services/`, `repositories/` en la raíz, con to
 **Por qué no el de estado.** Las tres columnas *son* la dimensión de estado. Filtrar por `DONE` dejaría dos columnas vacías: el tablero parecería roto, no filtrado.
 **Por qué en la URL.** Un tablero filtrado se puede compartir por enlace y sobrevive a una recarga. El coste fue mínimo porque el router propio ya usa `useSyncExternalStore`: bastó con incluir `location.search` en la instantánea. Se usa `replaceState` y no `pushState` para que teclear en el buscador no llene el historial.
 **Consecuencia.** Los filtros se aplican en SQL, no sobre un array ya descargado, y una columna sin coincidencias distingue «Sin tareas que coincidan» de «Sin tareas».
+
+### ADR-020 — Objetivos táctiles de 44 px, y por qué el tablero sigue sin arrastre
+
+**Contexto.** Al revisar la aplicación en un móvil apareció una fricción real: los controles de la
+tarjeta —editar, borrar y las dos flechas de transición— miden **28×32 px**. Cumplen el mínimo de
+**WCAG 2.2 SC 2.5.8** (24×24, nivel AA) pero no la recomendación de **SC 2.5.5** ni la de Apple
+(44×44), y con el pulgar se fallan. La reacción intuitiva es pedir arrastre de tarjetas.
+
+**Decisión.** Elevar el objetivo táctil a **44×44 px solo donde el puntero es grueso**
+(`pointer-coarse`), añadir `touch-manipulation` para eliminar el retardo de ~300 ms del doble toque,
+y dar respuesta inmediata al toque con `active:scale`. En ratón los controles siguen en 28×32: la
+densidad de la interfaz en escritorio no es un problema que haya que resolver.
+
+Medido después del cambio, sobre los 18 controles del tablero en un viewport de 375 px: **18 de 18
+alcanzan 44×44**, frente a 0 de 18 antes. En puntero fino siguen en 28×32.
+
+**El arrastre se mantiene descartado, y ahora hay una razón medida además de la de coste.** Por
+debajo de `lg` el tablero es un carrusel horizontal con `scroll-snap-type: x mandatory`: en un móvil
+de 375 px mide 955 px de ancho. **El gesto de arrastrar una tarjeta hacia otra columna es
+exactamente el gesto de desplazar el carrusel**, y para soltarla hay que desplazar mientras se
+arrastra. No es un detalle de implementación: es un conflicto entre dos gestos que ocupan el mismo
+movimiento del dedo, y la salida habitual —un `delay` de activación y desactivar el anclaje durante
+el arrastre— compra el arrastre a cambio de que el carrusel deje de responder como espera el
+sistema operativo.
+
+**Y aunque entrara, no sustituiría a las flechas.** **WCAG 2.2 SC 2.5.7 (Dragging Movements**,
+nivel AA) exige que toda funcionalidad que dependa de arrastrar tenga una alternativa de un solo
+puntero. Las flechas son esa alternativa. El arrastre sería una capa opcional encima, no un
+reemplazo, y con él habría que sostener dos caminos de mutación en lugar de uno.
+
+**Alternativas descartadas.** Deslizar la tarjeta compite con el mismo scroll horizontal. Una
+pulsación larga es poco descubrible y añade el mismo conflicto. Un menú «Mover a…» de dos toques
+funciona, pero duplica lo que la flecha ya hace en uno.
+
+**Relación con ADR-018.** No lo sustituye: lo confirma con evidencia que en su momento no se tenía.
+ADR-018 descartó el arrastre por coste y accesibilidad; esta revisión mide el coste ergonómico real
+de su alternativa y lo corrige, sin cambiar la decisión de fondo.
 
 ## 4. Stack final
 

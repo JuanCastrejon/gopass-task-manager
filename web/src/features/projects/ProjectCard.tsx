@@ -27,7 +27,7 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
         <h3 className="min-w-0 truncate text-sm font-semibold" title={project.name}>
           {project.name}
         </h3>
-        <div className="flex shrink-0 gap-0.5">
+        <div className="flex shrink-0 gap-0.5 pointer-coarse:gap-1">
           <Button variant="ghost" size="sm" onClick={() => setEditando(true)} aria-label={`Editar ${project.name}`}>
             <Pencil className="size-3.5" aria-hidden />
           </Button>

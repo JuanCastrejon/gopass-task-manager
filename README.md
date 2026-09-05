@@ -55,7 +55,7 @@ Un `CHECK` verifica la invariante `DONE ⟺ completed_at IS NOT NULL` y un trigg
 **5. Sin ORM y sin librería de enrutado.**
 Dos entidades no justifican una abstracción que oculta el control granular del SQL y los planes de ejecución; el patrón repositorio da el mismo aislamiento. Para el enrutado se midió el coste real de `react-router-dom` en este bundle —**+13.4 KB gzip para dos rutas**— y se resolvió con la History API.
 
-El registro completo son **20 ADRs** en [docs/spec/04-arquitectura.md](docs/spec/04-arquitectura.md), cada uno con su contexto, sus alternativas descartadas y por qué.
+El registro completo son **21 ADRs** en [docs/spec/04-arquitectura.md](docs/spec/04-arquitectura.md), cada uno con su contexto, sus alternativas descartadas y por qué.
 
 ## Arquitectura
 
@@ -143,7 +143,7 @@ Límites conocidos del diseño actual: en edición concurrente gana la última e
 | [Requisitos y trazabilidad](docs/spec/01-requisitos.md) | RF y RNF con criterios de aceptación; qué queda fuera y por qué |
 | [Modelo de dominio](docs/spec/02-modelo-dominio.md) | DDL completo, invariantes y decisiones de modelado |
 | [Contrato de API](docs/spec/03-contrato-api.md) | Endpoints, errores RFC 7807, mapeo `SQLSTATE`→HTTP |
-| [Arquitectura](docs/spec/04-arquitectura.md) | Capas, estructura y los 20 ADRs |
+| [Arquitectura](docs/spec/04-arquitectura.md) | Capas, estructura y los 21 ADRs |
 | [Estrategia de calidad](docs/spec/05-estrategia-calidad.md) | Pruebas, CI, quality gates y matriz de trazabilidad |
 | [Verificación de PostgreSQL](docs/spec/08-verificacion-postgres.md) | Mediciones contra el motor que decidieron el modelo de datos |
 | [Desarrollo asistido por IA](docs/process/ai-assisted-development.md) | Cómo se trabajó y qué se verificó |
