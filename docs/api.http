@@ -1,0 +1,178 @@
+### GoPass Task Manager — colección ejecutable de la API
+#
+# Doce endpoints. Se ejecuta desde VS Code con la extensión REST Client
+# (`humao.rest-client`) o desde JetBrains, pulsando «Send Request» sobre cada
+# bloque. Sirve además de guion: el orden de abajo recorre el ciclo completo,
+# incluidos los caminos de error.
+#
+# Requisito: `docker compose up --build`.
+
+@host = http://localhost:3000/api
+
+
+### Salud — lo que consume el healthcheck de Docker
+GET {{host}}/health
+
+
+### Agregados del panel. Una sola consulta en la base, no un conteo en el cliente.
+# Las claves de `byStatus` y `byPriority` vienen siempre completas, con 0
+# incluido: un consumidor no debería tener que conocerse el dominio.
+GET {{host}}/stats
+
+
+### Listar proyectos con su avance
+# `taskCount`, `doneCount` y `progress` salen de una sola consulta con
+# agregación condicional. Un proyecto sin tareas devuelve `progress: 0`.
+GET {{host}}/projects
+
+
+### Crear un proyecto
+# @name crearProyecto
+POST {{host}}/projects
+Content-Type: application/json
+
+{
+  "name": "Peajes — corredor sur",
+  "description": "Homologación de lectores y conciliación de tránsitos"
+}
+
+### ─────────────── caminos de error del alta ───────────────
+
+### Nombre en blanco → 400 con el campo señalado
+POST {{host}}/projects
+Content-Type: application/json
+
+{ "name": "   " }
+
+
+### Nombre duplicado ignorando mayúsculas y espacios → 409 PROJECT_NAME_TAKEN
+# El índice de la base es `lower(btrim(name))`, así que esto choca con el
+# proyecto creado arriba. El conflicto lo detecta PostgreSQL: no se consulta
+# antes de insertar, porque eso sería una condición de carrera.
+POST {{host}}/projects
+Content-Type: application/json
+
+{ "name": "  peajes — corredor sur  " }
+
+
+### ─────────────── detalle y edición ───────────────
+
+@projectId = {{crearProyecto.response.body.id}}
+
+### Detalle
+GET {{host}}/projects/{{projectId}}
+
+### Un id que no es UUID → 400, no 500
+GET {{host}}/projects/no-soy-un-uuid
+
+### Un UUID que no existe → 404
+GET {{host}}/projects/00000000-0000-4000-8000-000000000000
+
+### Actualización parcial
+# Lo ausente no se toca; un `null` explícito borra el campo.
+PATCH {{host}}/projects/{{projectId}}
+Content-Type: application/json
+
+{ "description": null }
+
+### Body vacío → 400
+PATCH {{host}}/projects/{{projectId}}
+Content-Type: application/json
+
+{}
+
+
+### ─────────────── tareas ───────────────
+
+### Crear una tarea en el proyecto
+# @name crearTarea
+POST {{host}}/projects/{{projectId}}/tasks
+Content-Type: application/json
+
+{
+  "title": "Homologar lectores del corredor sur",
+  "priority": "HIGH"
+}
+
+@taskId = {{crearTarea.response.body.id}}
+
+### Crear una tarea en un proyecto que no existe → 404, no una tarea huérfana
+POST {{host}}/projects/00000000-0000-4000-8000-000000000000/tasks
+Content-Type: application/json
+
+{ "title": "Huérfana" }
+
+
+### La API rechaza escribir `completedAt`: lo sella la base
+# Los esquemas son estrictos. Sin `.strict()`, Zod descartaría la clave en
+# silencio y el cliente creería que guardó esa fecha.
+PATCH {{host}}/tasks/{{taskId}}
+Content-Type: application/json
+
+{ "status": "DONE", "completedAt": "2020-01-01T00:00:00.000Z" }
+
+
+### Pasar a DONE — el trigger sella `completedAt` sin que nadie lo pase
+PATCH {{host}}/tasks/{{taskId}}
+Content-Type: application/json
+
+{ "status": "DONE" }
+
+### Editar sin tocar el estado: `completedAt` NO se mueve
+PATCH {{host}}/tasks/{{taskId}}
+Content-Type: application/json
+
+{ "title": "Homologar lectores — revisado" }
+
+### Salir de DONE: `completedAt` vuelve a null
+PATCH {{host}}/tasks/{{taskId}}
+Content-Type: application/json
+
+{ "status": "IN_PROGRESS" }
+
+
+### ─────────────── filtros ───────────────
+
+### Por estado, repetible
+GET {{host}}/projects/{{projectId}}/tasks?status=TODO&status=IN_PROGRESS
+
+### Por prioridad, combinado con el estado
+GET {{host}}/projects/{{projectId}}/tasks?priority=HIGH&status=IN_PROGRESS
+
+### Búsqueda por título, insensible a mayúsculas
+GET {{host}}/projects/{{projectId}}/tasks?q=LECTORES
+
+### Un valor fuera del enum → 400. No se ignora en silencio: un filtro
+### ignorado devolvería resultados que el cliente cree filtrados.
+GET {{host}}/projects/{{projectId}}/tasks?status=BANANA
+
+### Un filtro vacío también es un error del cliente, no «todos»
+GET {{host}}/projects/{{projectId}}/tasks?status=
+
+
+### ─────────────── LA decisión de diseño ───────────────
+
+### Borrar el proyecto con la tarea dentro → 409 PROJECT_HAS_TASKS
+# La restricción es `ON DELETE RESTRICT` y la impone PostgreSQL. No se
+# comprueba antes con un SELECT: entre esa consulta y el DELETE cabría un
+# INSERT de otra petición.
+DELETE {{host}}/projects/{{projectId}}
+
+### El proyecto sigue ahí: el 409 no destruyó nada
+GET {{host}}/projects/{{projectId}}
+
+### Mover la tarea a otro proyecto también libera el borrado
+# (crear antes un proyecto destino y sustituir el id)
+# PATCH {{host}}/tasks/{{taskId}}
+# Content-Type: application/json
+#
+# { "projectId": "<id-del-destino>" }
+
+### Borrar la tarea
+DELETE {{host}}/tasks/{{taskId}}
+
+### Y ahora sí, el proyecto vacío se borra → 204
+DELETE {{host}}/projects/{{projectId}}
+
+### Confirmación: ya no existe → 404
+GET {{host}}/projects/{{projectId}}
