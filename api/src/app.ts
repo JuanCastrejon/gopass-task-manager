@@ -4,6 +4,7 @@ import { errorHandler, notFoundHandler } from './http/error-handler.js';
 import { requestId } from './http/request-id.js';
 import { projectsRouter } from './modules/projects/projects.routes.js';
 import { statsRouter } from './modules/stats/stats.routes.js';
+import { projectTasksRouter, tasksRouter } from './modules/tasks/tasks.routes.js';
 import { setupSwagger } from './docs/swagger.js';
 
 export function createApp(): Express {
@@ -30,8 +31,11 @@ export function createApp(): Express {
   // Swagger UI en /api/docs y especificación OpenAPI en /api/docs.json
   setupSwagger(app);
 
-  // Rutas de dominio
+  // El anidado va primero: Express evalúa en orden de registro y
+  // `/api/projects/:projectId/tasks` es más específico que `/api/projects`.
+  app.use('/api/projects/:projectId/tasks', projectTasksRouter);
   app.use('/api/projects', projectsRouter);
+  app.use('/api/tasks', tasksRouter);
   app.use('/api/stats', statsRouter);
 
   app.use(notFoundHandler);
