@@ -58,10 +58,26 @@ export function Modal({ open, onClose, title, children }: Props) {
         // solo puede venir del fondo.
         if (event.target === ref.current) onClose();
       }}
-      className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-xl border border-border
-                 bg-surface p-0 text-ink shadow-xl backdrop:bg-ink/40"
+      /**
+       * `dvh` y no `vh`: en un móvil real la barra del navegador se encoge al
+       * hacer scroll y `vh` se queda con el alto grande, así que el pie del
+       * diálogo cae fuera de la pantalla.
+       *
+       * Columna flex con el cuerpo desplazable: sin esto scrollea el diálogo
+       * entero y el título se va con él. Medido a 844x390 —un móvil en
+       * horizontal—, donde el formulario de tarea no cabe.
+       *
+       * `open:flex` y no `flex` a secas: un `<dialog>` cerrado se oculta con
+       * el `display: none` de la hoja del navegador, y declarar `display`
+       * incondicionalmente lo anula. Con `flex`, los diálogos cerrados de la
+       * página seguían existiendo y `getByRole('dialog')` encontraba dos. Lo
+       * cazó el E2E del conflicto de borrado.
+       */
+      className="m-auto open:flex max-h-[calc(100dvh-2rem)] w-[min(32rem,calc(100vw-2rem))] flex-col
+                 rounded-xl border border-border bg-surface p-0 text-ink shadow-xl
+                 backdrop:bg-ink/40"
     >
-      <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+      <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-5 py-4">
         <h2 id={titleId} className="text-base font-semibold">
           {title}
         </h2>
@@ -74,7 +90,7 @@ export function Modal({ open, onClose, title, children }: Props) {
           <X className="size-4" aria-hidden />
         </button>
       </div>
-      <div className="px-5 py-4">{children}</div>
+      <div className="overflow-y-auto px-5 py-4">{children}</div>
     </dialog>
   );
 }
