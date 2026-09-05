@@ -70,7 +70,7 @@ probes:
     unavailable:
       reason: >
         Sin dependency-cruiser configurado. Montarlo es un slice propio, no un
-        ajuste dentro del plazo de esta entrega. Se declara ausente en vez de
+        ajuste dentro de la planificacion actual. Se declara ausente en vez de
         dejar el gate en not-measured: NO MEDIDO e INCUMPLIDO no son lo mismo.
       since: "2026-09-05"
     command: validate:deps

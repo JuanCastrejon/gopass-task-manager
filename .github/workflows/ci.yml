@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verificación
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gopass
+          POSTGRES_PASSWORD: gopass
+          POSTGRES_DB: gopass_tasks
+        # 5433 igual que en docker-compose: el runner ya trae un PostgreSQL
+        # instalado y el 5432 es un puerto en disputa.
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U gopass -d gopass_tasks"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    env:
+      DATABASE_URL: postgres://gopass:gopass@localhost:5433/gopass_tasks
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            api/package-lock.json
+            web/package-lock.json
+
+      - name: Instalar dependencias
+        run: |
+          npm ci
+          npm --prefix api ci
+          npm --prefix web ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Pruebas del backend contra PostgreSQL real
+        run: npm --prefix api run test:coverage
+
+      - name: Pruebas del frontend
+        run: npm --prefix web test
+
+      - name: Build
+        run: npm run build
+
+      - name: Navegador para los E2E
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E
+        run: npm run test:e2e
+
+      - name: Informe de Playwright
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Quality gate
+        run: npx sdlc quality-gate --slice ci --phase F8 --run --json
+
+      - name: Evidencia del quality gate
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidencia-quality-gate
+          path: |
+            .github/agent-state/evidence/
+            coverage/coverage-summary.json
+          retention-days: 7
+          if-no-files-found: ignore
