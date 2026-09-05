@@ -63,7 +63,9 @@ Proveer una API de tareas robusta, predecible y performante que gobierne con abs
   - `RF-10`: Transición de estado y sellado automático de `completed_at` en base de datos.
   - `RF-11`: Eliminación de tarea por ID (204 No Content).
   - `RF-13`: Filtrado por estado, prioridad y búsqueda por texto en título/descripción.
-  - `RF-14`: Reasignación de tarea a otro proyecto mediante actualización parcial (PATCH).
+  - Reasignación de tarea a otro proyecto mediante actualización parcial (PATCH). No corresponde a
+    ningún RF: es la capacidad emergente que hace cumplible el mensaje del 409 (ADR-017). `RF-14`
+    —fecha de vencimiento— sigue siendo WON'T y no se implementa.
 
 ---
 
