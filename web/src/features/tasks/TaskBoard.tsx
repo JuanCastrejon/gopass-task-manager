@@ -144,7 +144,7 @@ export function TaskBoard({ projectId }: { projectId: string }) {
       )}
 
       {tareas.isPending && (
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {TASK_STATUSES.map((s) => (
             <div key={s} className="space-y-2 rounded-xl border border-border bg-canvas/60 p-3">
               <Skeleton className="h-3 w-24" />

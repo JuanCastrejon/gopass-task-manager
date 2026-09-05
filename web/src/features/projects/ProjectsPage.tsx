@@ -31,7 +31,7 @@ export function ProjectsPage() {
           datos anteriores siguen en caché, y desmontarlos haría parpadear la
           lista entera a "cargando" después de cada creación. */}
       {proyectos.isPending && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <ProjectCardSkeleton />
           <ProjectCardSkeleton />
           <ProjectCardSkeleton />
@@ -63,7 +63,7 @@ export function ProjectsPage() {
           <span aria-live="polite" className="sr-only">
             {proyectos.isFetching ? 'Actualizando proyectos' : ''}
           </span>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {proyectos.data.map((p) => (
               <ProjectCard key={p.id} project={p} />
             ))}

@@ -45,7 +45,7 @@ export function StatsPanel() {
   // que la página no da un salto cuando llegan los datos.
   if (isPending) {
     return (
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-busy>
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-busy>
         {ORDEN.concat('TODO').map((_, i) => (
           <div key={i} className="rounded-xl border border-border bg-surface p-4">
             <Skeleton className="h-3 w-20" />
@@ -60,7 +60,7 @@ export function StatsPanel() {
 
   return (
     <section className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Tarjeta icono={<FolderKanban className="size-4" aria-hidden />} etiqueta="Proyectos" valor={data.projects} />
         <Tarjeta icono={<ListTodo className="size-4" aria-hidden />} etiqueta="Tareas" valor={data.tasks} />
         <Tarjeta icono={<CheckCircle2 className="size-4" aria-hidden />} etiqueta="Completadas" valor={data.done} />
