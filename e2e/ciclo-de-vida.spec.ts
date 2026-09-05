@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './limpieza.js';
 
 /**
  * Escenario 1 — el ciclo completo, con recarga.

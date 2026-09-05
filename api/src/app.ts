@@ -11,6 +11,13 @@ export function createApp(): Express {
   const app = express();
 
   app.disable('x-powered-by');
+
+  /**
+   * La API siempre vive detrás de un proxy —nginx en Compose, el del hosting
+   * en un despliegue—. Sin esto Express ignora `X-Forwarded-Proto` y una
+   * redirección generada tras terminación TLS externa saldría como `http`.
+   */
+  app.set('trust proxy', 1);
   app.use(requestId);
   app.use(express.json({ limit: '128kb' }));
 

@@ -26,7 +26,9 @@ services:
     environment:
       NODE_ENV: production
       API_PORT: 3000
-      SEED_ON_START: "true"
+      # Por defecto sí, para que la aplicación abra con datos (RF-16).
+      # `SEED_ON_START=false` en `.env` lo desactiva.
+      SEED_ON_START: "${SEED_ON_START:-true}"
       DATABASE_URL: postgres://${POSTGRES_USER:-gopass}:${POSTGRES_PASSWORD:-gopass}@db:5432/${POSTGRES_DB:-gopass_tasks}
     ports:
       - "${API_PORT:-3000}:3000"

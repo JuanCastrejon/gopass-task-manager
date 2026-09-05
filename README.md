@@ -6,7 +6,20 @@ Gestión de tareas por proyectos. **React 18 · Node/Express · PostgreSQL 16.**
 docker compose up --build
 ```
 
-Un solo requisito: Docker. Levanta la base, aplica migraciones, siembra datos de ejemplo y sirve la aplicación en **<http://localhost:5173>**.
+Un solo requisito: Docker. Levanta la base, aplica migraciones y siembra datos de ejemplo.
+
+| | |
+|---|---|
+| **Aplicación** | <http://localhost:5173> |
+| **API documentada (Swagger UI)** | <http://localhost:5173/api/docs/> |
+
+El navegador consume la API por la ruta relativa `/api` sobre ese mismo origen, así que no hace falta configurar CORS ni conocer un segundo puerto. La API también se publica en <http://localhost:3000> para atacarla directamente con `curl` o Postman; es una puerta de diagnóstico, no la de uso normal.
+
+**Si alguno de esos puertos está ocupado**, se cambian sin tocar código: `WEB_PORT`, `API_PORT` y `POSTGRES_PORT` en `.env`. Dentro de la red de Docker los servicios siguen hablando por sus puertos nativos, así que solo cambia lo que se publica en el host.
+
+```bash
+WEB_PORT=8090 API_PORT=8091 POSTGRES_PORT=55433 docker compose up --build
+```
 
 ![Panel de proyectos](docs/assets/panel.png)
 
@@ -103,14 +116,15 @@ El [pipeline de CI](.github/workflows/ci.yml) ejecuta lint, typecheck, las prueb
 npm run install:all      # raíz, api/ y web/
 cp .env.example .env
 docker compose up -d db  # solo la base
-npm run dev              # api en :3000, web en :5173
+npm run dev              # api y web, en los puertos de `.env`
 ```
 
-El cliente pide siempre a `/api`, una ruta relativa: la reenvía el proxy de Vite en desarrollo y nginx en Docker. No hay configuración de CORS por ambiente ni URL de backend dentro del bundle.
+El cliente pide siempre a `/api`, una ruta relativa: la reenvía el proxy de Vite en desarrollo y nginx en Docker. No hay configuración de CORS por ambiente ni URL de backend dentro del bundle. `API_PORT` y `WEB_PORT` valen aquí igual que en Compose.
 
 | Comando | |
 |---|---|
 | `npm run reset` | Rehace la base desde cero con los datos de ejemplo |
+| `SEED_ON_START=false` | Arranca con la base migrada y **vacía**, para ver la aplicación sin datos |
 | `npm run migrate` · `npm run seed` | Migraciones y datos por separado |
 | `npm run lint` · `npm run typecheck` | Lo mismo que ejecuta CI |
 
