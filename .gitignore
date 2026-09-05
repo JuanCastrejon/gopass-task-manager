@@ -1,0 +1,22 @@
+node_modules/
+dist/
+build/
+coverage/
+reports/
+*.log
+.env
+.env.local
+.DS_Store
+.vite/
+playwright-report/
+test-results/
+.sdlc/backups/
+
+# Evidencia advisory de corridas locales del quality gate.
+# La evidencia autoritativa la produce CI, no el equipo local.
+.github/agent-state/evidence/
+*.tsbuildinfo
+
+.env
+playwright-report/
+test-results/
