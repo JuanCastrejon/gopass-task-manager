@@ -144,7 +144,7 @@ export function TaskBoard({ projectId }: { projectId: string }) {
       )}
 
       {tareas.isPending && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           {TASK_STATUSES.map((s) => (
             <div key={s} className="space-y-2 rounded-xl border border-border bg-canvas/60 p-3">
               <Skeleton className="h-3 w-24" />
@@ -156,14 +156,19 @@ export function TaskBoard({ projectId }: { projectId: string }) {
       )}
 
       {tareas.data && (
-        // En móvil, desplazamiento horizontal con anclaje: apilar las columnas
-        // convertiría el tablero en una lista larga y se perdería la noción de
-        // flujo, que es justo lo que un tablero comunica.
+        // Desplazamiento horizontal con anclaje hasta `lg`: apilar las
+        // columnas convertiría el tablero en una lista larga y se perdería la
+        // noción de flujo, que es justo lo que un tablero comunica.
+        //
+        // El umbral es `lg` (1024 px) y no `md` (768 px): en una tablet en
+        // vertical, tres columnas de 234 px dejaban los títulos envueltos en
+        // cuatro líneas. Con el carrusel, cada columna mide 82vw —unos 630 px
+        // a 768— y se lee de un vistazo.
         <div
           role="region"
           aria-label="Tablero de tareas"
           className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3
-                     md:grid md:grid-cols-3 md:overflow-visible md:pb-0"
+                     lg:grid lg:grid-cols-3 lg:overflow-visible lg:pb-0"
         >
           {TASK_STATUSES.map((estado) => {
             const columna = tareas.data.filter((t) => t.status === estado);
@@ -175,7 +180,7 @@ export function TaskBoard({ projectId }: { projectId: string }) {
                 key={estado}
                 aria-label={STATUS_LABEL[estado]}
                 className="flex w-[82vw] shrink-0 snap-center flex-col rounded-xl border border-border
-                           bg-canvas/60 p-3 md:w-auto"
+                           bg-canvas/60 p-3 lg:w-auto"
               >
                 <header className="mb-2.5 flex items-center gap-2 px-0.5">
                   <StatusDot status={estado} />
