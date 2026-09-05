@@ -8,8 +8,9 @@ import { messageFor } from '../../lib/error-messages.ts';
 import { ProjectFormDialog } from './ProjectFormDialog.tsx';
 import { DeleteProjectDialog } from './DeleteProjectDialog.tsx';
 import { useProject } from './api.ts';
+import { TaskBoard } from '../tasks/TaskBoard.tsx';
 
-/** Detalle del proyecto: cabecera con el avance y espacio reservado para tareas. */
+/** Detalle del proyecto: cabecera con el avance y, debajo, el tablero de tareas. */
 export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [editando, setEditando] = useState(false);
   const [borrando, setBorrando] = useState(false);
@@ -50,6 +51,9 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 </p>
               </div>
               <div className="flex shrink-0 gap-1.5">
+                {/* El nombre accesible dice QUÉ se edita o elimina: «Editar»
+                    a secas es ambiguo en una página donde también hay
+                    acciones sobre tareas. */}
                 <Button
                   variant="secondary"
                   size="sm"
@@ -60,10 +64,9 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                   Editar
                 </Button>
                 <Button
-                  variant="ghost"
+                  variant="danger"
                   size="sm"
                   aria-label="Eliminar proyecto"
-                  className="text-danger hover:bg-danger-soft hover:text-danger"
                   onClick={() => setBorrando(true)}
                 >
                   <Trash2 className="size-3.5" aria-hidden />
@@ -72,39 +75,33 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               </div>
             </div>
 
-            <div className="mt-5 space-y-2">
-              <div className="flex items-center justify-between text-xs text-ink-muted">
-                <span>Avance global del proyecto</span>
-                <span className="font-medium text-ink">{proyecto.data.progress}%</span>
-              </div>
-              <ProgressBar value={proyecto.data.progress} />
-              <div className="flex gap-4 text-xs text-ink-muted">
-                <span>
-                  {proyecto.data.taskCount}{' '}
-                  {proyecto.data.taskCount === 1 ? 'tarea en total' : 'tareas en total'}
+            <div className="mt-5 space-y-1.5">
+              <div className="flex items-baseline justify-between text-xs">
+                <span className="text-ink-muted">
+                  {proyecto.data.taskCount === 0
+                    ? 'Sin tareas'
+                    : `${proyecto.data.doneCount} de ${proyecto.data.taskCount} completadas`}
                 </span>
-                <span>•</span>
-                <span>{proyecto.data.doneCount} completadas</span>
+                <span className="font-medium tabular-nums">{proyecto.data.progress}%</span>
               </div>
+              <ProgressBar value={proyecto.data.progress} label="Avance del proyecto" />
             </div>
           </header>
 
-          {/* Espacio reservado para el tablero de tareas (SL-06) */}
-          <div className="rounded-xl border border-dashed border-border bg-surface p-8 text-center text-ink-muted">
-            <p className="font-medium text-ink">Tablero de Tareas</p>
-            <p className="mt-1 text-sm">El tablero Kanban de 3 columnas (TODO, IN_PROGRESS, DONE) y filtros se integrará en el siguiente slice de tareas.</p>
-          </div>
+          <TaskBoard projectId={projectId} />
 
           {editando && (
             <ProjectFormDialog open onClose={() => setEditando(false)} project={proyecto.data} />
           )}
           {borrando && (
-            <DeleteProjectDialog
-              open
-              onClose={() => setBorrando(false)}
-              project={proyecto.data}
-              onDeleted={() => navigate('/')}
-            />
+          <DeleteProjectDialog
+            open
+            onClose={() => setBorrando(false)}
+            project={proyecto.data}
+            // Tras borrarlo, quedarse en su detalle mostraría un 404: se
+            // vuelve al listado.
+            onDeleted={() => navigate('/')}
+          />
           )}
         </>
       )}
