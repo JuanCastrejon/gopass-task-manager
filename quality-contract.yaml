@@ -1,0 +1,162 @@
+# Contrato de calidad de GoPass Task Manager
+#
+# Reparto de responsabilidades:
+#   phase-contract.yaml -> QUE se mide y en que fase
+#   este archivo        -> CUANTO por tier y COMO se produce la metrica
+#   el engine           -> solo adjudica; no sabe que existe vitest ni stryker
+#
+# Regla de adopcion (ADR 0007): ningun control nace en `block`. Todo entra en
+# `observe`, pasa a `ratchet` contra la linea base y solo despues a `block`.
+#
+# Regla de honestidad: `provenance` dice de donde sale cada numero. Casi ninguno
+# tiene respaldo externo, y conviene que eso se vea.
+
+version: 1
+enforcement: observe
+
+tiers:
+  core:
+    description: Dinero, maquina de estados, seguridad y datos regulados.
+  standard:
+    description: Funcionalidad de producto sin impacto directo en dinero.
+  shell:
+    description: UI, scaffolding, documentacion y herramientas internas.
+
+# Generado desde config.surfaces (sdlc.config.schema.json), no inventado: un
+# path que no existe en disco hace vacuo cualquier gate sobre esa superficie
+# (checkSurfaces lo bloquea siempre). Si esto sale `[]`, es que config.surfaces
+# esta vacio todavia -- agregar superficies ahi, no aqui a mano.
+surfaces:
+  - id: api
+    path: api/src
+    owner: Juan Castrejon
+    tier: core
+  - id: web
+    path: web/src
+    owner: Juan Castrejon
+    tier: shell
+
+probes:
+  # `command` es el NOMBRE de un script de package.json, no una linea de shell:
+  # el engine lo invoca con el package manager detectado y rechaza cualquier
+  # token con metacaracteres.
+  #
+  # Un probe que este repo NO PUEDE ejecutar todavia se declara asi:
+  #
+  #   unavailable:
+  #     reason: sin runner de tests; montarlo es un slice propio, no un ajuste
+  #     since: "2026-08-13"          # opcional
+  #
+  # Con eso, TODOS los gates que dependen de sus metricas salen
+  # `not-applicable` con ese motivo, en vez de `not-measured`. NO MEDIDO e
+  # INCUMPLIDO son cosas distintas: un check rojo permanente que no las
+  # distingue ensena a ignorar la senal, y bajar los umbrales para que pase
+  # seria teatro. La exencion va sobre el PROBE (la capacidad que falta), nunca
+  # gate por gate, y sin `reason` escrito no hay exencion. Si la metrica
+  # aparece de todas formas, manda el numero medido y se avisa de que la
+  # declaracion sobra.
+  - id: coverage
+    command: validate:coverage
+    emits: coverage/coverage-summary.json
+    format: istanbul-summary
+    timeout_ms: 180000
+    when_absent: warn
+
+  - id: deps
+    # El id del probe no es el espacio de nombres de sus metricas: emite
+    # `dependencies.*`. `metrics_prefix` es lo que usa la declaracion de
+    # `unavailable` para saber a que gates alcanza.
+    metrics_prefix: dependencies
+    unavailable:
+      reason: >
+        Sin dependency-cruiser configurado. Montarlo es un slice propio, no un
+        ajuste dentro del plazo de esta entrega. Se declara ausente en vez de
+        dejar el gate en not-measured: NO MEDIDO e INCUMPLIDO no son lo mismo.
+      since: "2026-09-05"
+    command: validate:deps
+    emits: reports/dependencies.json
+    format: dependency-cruiser
+    timeout_ms: 60000
+    when_absent: warn
+
+  - id: mutation
+    unavailable:
+      reason: >
+        Sin runner de mutacion. Stryker sobre este alcance excede el
+        presupuesto de tiempo de la prueba tecnica.
+      since: "2026-09-05"
+    command: validate:mutation
+    emits: reports/mutation.json
+    format: stryker
+    timeout_ms: 3600000
+    when_absent: skip
+    applies_when:
+      min_subjects: 1
+
+gates:
+  # F8: el agente implementa. Ratchet desde 1.11: no puede empeorar respecto
+  # del baseline, pero el umbral absoluto de mas abajo sigue vigente ademas.
+  # Con baseline vacio (aun no promovido), se comporta como observe puro.
+  - id: F8.changed-lines-coverage
+    phase: F8
+    metric: coverage.changed_lines_pct
+    op: gte
+    mode: ratchet
+    thresholds:
+      core: 90
+      standard: 80
+      shell: 0
+    min_denominator:
+      metric: coverage.changed_lines_total
+      value: 1
+    provenance: decision-de-equipo
+
+  # F9: QA. En 1.9 sigue en observe; sube a ratchet cuando haya linea base.
+  - id: F9.mutation-survivors
+    phase: F9
+    metric: mutation.survived
+    op: eq
+    mode: observe
+    threshold: 0
+    min_denominator:
+      metric: mutation.total
+      value: 1
+    provenance: decision-de-equipo
+
+  - id: F9.no-coverage-mutants
+    phase: F9
+    metric: mutation.no_coverage
+    op: eq
+    mode: observe
+    threshold: 0
+    min_denominator:
+      metric: mutation.total
+      value: 1
+    provenance: decision-de-equipo
+
+  # F10: arquitectura. Nace limpio en la mayoria de repos, pero igual entra por
+  # la escalera: el denominador evita que "0 violaciones" signifique "0 modulos".
+  # Ratchet desde 1.11: el umbral absoluto (0) ya es la meta final, el ratchet
+  # aqui existe para que una regresion parcial (de 0 a N) se marque como tal
+  # incluso antes de que el umbral absoluto la capture.
+  - id: F10.dependency-violations
+    phase: F10
+    metric: dependencies.violations
+    op: eq
+    mode: ratchet
+    threshold: 0
+    min_denominator:
+      metric: dependencies.modules_scanned
+      value: 10
+    provenance: decision-de-equipo
+
+  - id: F10.dependency-cycles
+    phase: F10
+    metric: dependencies.cycles
+    op: eq
+    mode: ratchet
+    threshold: 0
+    min_denominator:
+      metric: dependencies.modules_scanned
+      value: 10
+    provenance: decision-de-equipo

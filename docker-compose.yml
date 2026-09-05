@@ -1,0 +1,53 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gopass}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gopass}
+      POSTGRES_DB: ${POSTGRES_DB:-gopass_tasks}
+    ports:
+      # 5433 en el host a propósito: un 5432 ocupado por otra instancia
+      # local es la causa número uno de "no me arranca".
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      # Sin esto la API arranca antes que PostgreSQL y falla de forma
+      # intermitente. `depends_on: service_healthy` depende de esta sonda.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gopass} -d ${POSTGRES_DB:-gopass_tasks}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  api:
+    build:
+      context: ./api
+    environment:
+      NODE_ENV: production
+      API_PORT: 3000
+      SEED_ON_START: "true"
+      DATABASE_URL: postgres://${POSTGRES_USER:-gopass}:${POSTGRES_PASSWORD:-gopass}@db:5432/${POSTGRES_DB:-gopass_tasks}
+    ports:
+      - "${API_PORT:-3000}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  web:
+    build:
+      context: ./web
+    ports:
+      - "${WEB_PORT:-5173}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  db_data:

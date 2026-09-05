@@ -1,0 +1,46 @@
+{
+  "$schema": "./schemas/sdlc.config.schema.json",
+  "schemaVersion": 1,
+  "frameworkVersion": "2.2.2",
+  "project": {
+    "name": "GoPass Task Manager",
+    "slug": "gopass-task-manager"
+  },
+  "mode": "greenfield",
+  "surfaces": [
+    {
+      "id": "api",
+      "path": "api/src",
+      "owner": "Juan Castrejon",
+      "tier": "core"
+    },
+    {
+      "id": "web",
+      "path": "web/src",
+      "owner": "Juan Castrejon",
+      "tier": "shell"
+    }
+  ],
+  "governance": {
+    "threatModel": "single-maintainer"
+  },
+  "gitFlow": {
+    "integrationBranch": "develop",
+    "stableBranch": "main",
+    "branchPrefixes": [
+      "feature/",
+      "fix/",
+      "docs/"
+    ]
+  },
+  "openspec": {
+    "profile": "minimal"
+  },
+  "stack": {
+    "backend": "node-express",
+    "frontend": "react-vite",
+    "database": "postgresql",
+    "designSystem": "tailwind",
+    "mobile": null
+  }
+}
