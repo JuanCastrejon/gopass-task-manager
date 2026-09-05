@@ -1,0 +1,60 @@
+@import 'tailwindcss';
+
+/**
+ * Tokens semánticos antes que utilidades.
+ *
+ * El riesgo de Tailwind es que la interfaz acabe pareciendo una plantilla.
+ * Se mitiga decidiendo aquí el significado de cada color —qué es un estado,
+ * qué es una prioridad— y componiendo con esos nombres, en vez de repartir
+ * utilidades sueltas por el árbol de componentes.
+ */
+@theme {
+  --color-surface: #ffffff;
+  --color-canvas: #f6f7f9;
+  --color-border: #e3e6ea;
+  --color-ink: #16191d;
+  --color-ink-muted: #5d6672;
+
+  --color-brand: #0b5fff;
+  --color-brand-soft: #e8f0ff;
+
+  /* Estados de tarea */
+  --color-status-todo: #6b7280;
+  --color-status-todo-soft: #f1f3f5;
+  --color-status-progress: #b45309;
+  --color-status-progress-soft: #fef3c7;
+  --color-status-done: #047857;
+  --color-status-done-soft: #d1fae5;
+
+  /* Prioridades */
+  --color-priority-low: #4b5563;
+  --color-priority-low-soft: #f1f3f5;
+  --color-priority-medium: #1d4ed8;
+  --color-priority-medium-soft: #dbeafe;
+  --color-priority-high: #b91c1c;
+  --color-priority-high-soft: #fee2e2;
+
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fee2e2;
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+      'Helvetica Neue', Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Foco visible: la interfaz debe ser operable con teclado (RNF-08). */
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+}
