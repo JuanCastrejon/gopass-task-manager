@@ -304,6 +304,70 @@ funciona, pero duplica lo que la flecha ya hace en uno.
 ADR-018 descartó el arrastre por coste y accesibilidad; esta revisión mide el coste ergonómico real
 de su alternativa y lo corrige, sin cambiar la decisión de fondo.
 
+**Revisado por ADR-021.** El arrastre acabó entrando. Lo que este ADR mide sobre el conflicto con
+el carrusel sigue siendo cierto; lo que le faltaba era que un retardo de activación separa los dos
+gestos. Los objetivos de 44 px se mantienen y son ahora la alternativa que exige WCAG 2.5.7.
+
+### ADR-021 — Arrastre de tarjetas, encima de las flechas y no en su lugar
+
+**Contexto.** ADR-018 descartó el arrastre por coste y accesibilidad, y ADR-020 lo confirmó al medir
+el conflicto con el carrusel. Ambos siguen siendo ciertos en lo que afirman. Lo que ninguno de los
+dos evaluó es que **mantener pulsado y deslizar son gestos distinguibles**: un retardo de activación
+los separa, que es como lo resuelven los tableros que sí lo tienen. Con esa pieza, el conflicto deja
+de ser estructural y pasa a ser un parámetro.
+
+**Decisión.** `@dnd-kit/core`, sin `@dnd-kit/sortable`: una tarjeta cambia de columna, no se ordena
+dentro de ella, así que el paquete de ordenación solo añadiría superficie de error.
+
+| | |
+|---|---|
+| Ratón | `MouseSensor`, activación por **distancia de 6 px** |
+| Táctil | `TouchSensor`, activación por **250 ms** con tolerancia de 8 px |
+| Teclado | **sin `KeyboardSensor`** |
+
+El retardo es lo que separa los dos gestos: un deslizamiento rápido sigue desplazando el carrusel, y
+solo la pulsación mantenida levanta la tarjeta. La tolerancia cancela la activación si el dedo se
+mueve antes de cumplirse el tiempo, devolviendo el gesto al scroll nativo.
+
+No se registra `KeyboardSensor` a propósito: interceptaría Espacio, Enter y las flechas de
+dirección, que son justo las teclas de los botones que viven dentro de la tarjeta. La vía de teclado
+son esos botones.
+
+**Las flechas se quedan, y no es una cortesía.** **WCAG 2.2 SC 2.5.7 (Dragging Movements**, nivel
+AA) exige que toda funcionalidad que dependa de arrastrar tenga una alternativa de un solo puntero.
+El arrastre es una capa encima; las flechas son el camino garantizado.
+
+**El anclaje se apaga mientras se arrastra.** `scroll-snap-type: mandatory` se resuelve en el hilo
+del compositor: si sigue activo mientras el autoscroll desplaza el carrusel, el navegador tira de
+vuelta hacia la columna centrada y la tarjeta salta. El contenedor alterna a `snap-none` durante el
+arrastre y lo recupera al soltar.
+
+**Arrastrar permite cualquier columna; las flechas, solo la contigua.** No es una incoherencia: las
+flechas son contiguas porque en una tarjeta estrecha caben dos botones, no tres, y el dominio no
+prohíbe pasar de `TODO` a `DONE`. Obligar a dos arrastres para llegar a «Completada» sería una
+limitación de la interfaz disfrazada de regla de negocio.
+
+**Soltar fuera devuelve la tarjeta a su sitio** con la animación de vuelta del `DragOverlay`, sin
+disparar ninguna petición. El clon se pinta en un portal porque dentro del carrusel el
+`overflow-x: auto` lo recortaría al salir de la columna.
+
+**El foco depende del origen del movimiento.** Con las flechas se conserva lo de ADR-018: el botón
+pulsado se desmonta y la tarjeta se enfoca a sí misma. Con el arrastre no se enfoca nada: el puntero
+no ha perdido su referencia y forzar el foco pintaría un anillo que nadie pidió.
+
+**Coste medido.** El bundle pasa de **68,40 kB a 84,26 kB gzip: +15,86 kB**. Es más de lo que costaba
+`react-router` (+13,4 kB), que sí se descartó, pero aquel resolvía dos rutas que ya funcionaban con
+sesenta líneas propias; este entrega una interacción que no existía.
+
+**Lo que NO se hizo.** Zonas de destino fijas flotando sobre el tablero: restan altura en una
+pantalla de 375 px y añaden una segunda representación del flujo que ya comunican las columnas.
+
+**Relación con ADR-005.** El proyecto evita el optimismo artificial y la caché contiene solo lo que
+PostgreSQL confirmó. Eso **no cambia**. Al soltar, la tarjeta se queda en la columna destino mediante
+una **proyección de presentación** —un estado local que dice «esta tarjeta se está moviendo allí»—,
+no escribiendo una predicción en la caché. Al no haber predicción, el error no necesita rollback:
+se retira la proyección y la tarjeta reaparece donde el servidor dice que está.
+
 ## 4. Stack final
 
 | Capa | Elección | Versión |
@@ -319,8 +383,9 @@ de su alternativa y lo corrige, sin cambiar la decisión de fondo.
 | Estilos | Tailwind CSS + lucide-react | 4.x |
 | Enrutado | propio, sobre la History API | — |
 | Modales | elemento nativo `<dialog>` | — |
+| Arrastre | `@dnd-kit/core` (ADR-021) | 6.3.1 |
 | Pruebas | Vitest + Supertest | — |
-| E2E | Playwright (2 escenarios, tras el freeze) | — |
+| E2E | Playwright (4 escenarios) | — |
 | CI | GitHub Actions | — |
 | Gates | `sistema-multiagente-sdlc` (`quality-gate`, `coverage-diff`) | 2.2.2 |
 | Gestor de paquetes | npm | 10.x |

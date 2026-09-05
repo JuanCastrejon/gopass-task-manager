@@ -15,7 +15,7 @@ El reparto no es doctrinal, es de retorno por hora dentro de un plazo de 20 hora
 | **Integración de API contra PostgreSQL real** | ~65 % | Una sola prueba de `POST /projects → POST /tasks → PATCH status → GET` ejercita middleware, Zod, ruta, repositorio, SQL parametrizado y las restricciones reales del motor. Ningún otro tipo de prueba cubre tanto por línea escrita. |
 | **Unitarias de lógica no trivial** | ~15 % | Solo el mapeo `SQLSTATE`→HTTP, el cálculo de avance y la regla de `completed_at`. No se prueban getters ni se simula `pg`: simular el driver prueba el simulador. |
 | **Componentes de React** | ~10 % | Los estados vacío, cargando y error de la vista de proyecto, con la API simulada a nivel de `fetch`. |
-| **E2E con Playwright** | ~10 % | Exactamente **2 escenarios**, escritos **después** del feature freeze. |
+| **E2E con Playwright** | ~10 % | **4 escenarios**. Los dos primeros, tras el feature freeze; los dos del arrastre, con la funcionalidad que los trajo. |
 
 ### Aislamiento: una base por worker de Vitest
 
@@ -46,7 +46,7 @@ Detalles que importan:
 
 No se usa. Docker Compose ya levanta un PostgreSQL y las pruebas crean su propia base por worker sobre esa misma instancia. Testcontainers da portabilidad perfecta a cambio de tiempo de arranque y una dependencia más; con Compose ya en el proyecto, no compensa dentro del plazo.
 
-### Los 2 escenarios E2E
+### Los 4 escenarios E2E
 
 1. **Ciclo completo**: crear proyecto → crear tarea → verla en «Por hacer» → moverla hasta «Completada» → **recargar la página** → sigue ahí y el avance marca `aria-valuenow="100"`.
 2. **Conflicto de borrado**: crear un proyecto con una tarea → intentar eliminarlo → la interfaz muestra el mensaje del 409 con `role="alert"` → cancelar → el proyecto sigue existiendo.
@@ -75,9 +75,10 @@ Un requisito sin prueba no se considera entregado. Esta tabla se completa durant
 | RF-05 | `DELETE /api/projects/:id` | ✅ 204 sin cuerpo, **409 con tareas y el proyecto sigue existiendo después**, 404 —y no 409— si no existe · E2E escenario 2 |
 | RF-06 | `POST /api/projects/:projectId/tasks` | ✅ `tests/integration/tasks.test.ts` → 201 con los valores por defecto de la base, 404 `PROJECT_NOT_FOUND` si el proyecto no existe, título en blanco y >200 caracteres → 400 |
 | RF-07 / RF-08 | esquema Zod + `ENUM` | ✅ estado fuera del enum → 400 antes de tocar la base; `completedAt` y las erratas de campo → 400 por `.strict()`; unitaria del `22P02` |
-| RF-09 | `PATCH /api/tasks/:id` | ✅ ciclo completo del trigger desde HTTP: nace sin fecha, `DONE` la sella, editar sin tocar el estado no la mueve, reenviar `DONE` tampoco, salir la limpia, volver la re-sella con otra fecha · E2E escenario 1 |
+| RF-09 | `PATCH /api/tasks/:id` | ✅ ciclo completo del trigger desde HTTP: nace sin fecha, `DONE` la sella, editar sin tocar el estado no la mueve, reenviar `DONE` tampoco, salir la limpia, volver la re-sella con otra fecha · E2E escenario 1 · E2E escenarios 1 y 3 (arrastre directo de `TODO` a `DONE`, que sobrevive a la recarga) |
 | RF-10 | `PATCH` / `DELETE /api/tasks/:id` | ✅ parcial deja el resto intacto, `null` borra la descripción, body vacío → 400, 404 en ambas, 204 sin cuerpo · reasignación de proyecto y su 404 |
 | RF-11 | `GET /api/projects/:projectId/tasks` · `TaskBoard` | ✅ API: distingue proyecto sin tareas de proyecto inexistente, ordena por prioridad sin `CASE`, no mezcla tareas de otro proyecto · tablero implementado y verificado en navegador |
+| Arrastre | `TaskCard` + `TaskBoard` (ADR-021) | E2E escenario 3: mover entre columnas y persistir · escenario 4: soltar fuera devuelve la tarjeta y no dispara petición |
 | RF-12 | `GET /api/stats` · `StatsPanel` | ✅ `tests/integration/stats.test.ts` → sin datos devuelve ceros con todas las claves presentes, agregados correctos, reparto por estado y prioridad, números y no los `bigint` como string |
 | RF-13 | filtros en `GET .../tasks` | ✅ **entró en SL-05** → estado y prioridad repetibles, combinación de ambos, `q` con `ILIKE` insensible a mayúsculas, valores repetidos deduplicados, sin coincidencias → `[]` y no 404, valor fuera del enum → 400, filtro vacío → 400 |
 | RF-15 | `GET /api/health` | integración: 200 y campo de estado de la base |
@@ -183,7 +184,7 @@ typecheck     →  tsc --noEmit  (api y web)
 test:api      →  vitest run --coverage  contra el servicio postgres:16 en 5433
 test:web      →  vitest run
 build         →  tsc + vite build
-e2e           →  playwright test  (chromium, 2 escenarios, bloqueante)
+e2e           →  playwright test  (chromium, 4 escenarios, bloqueante)
 quality-gate  →  sdlc quality-gate --slice ci --phase F8 --run --json
 ```
 

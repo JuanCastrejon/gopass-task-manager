@@ -5,7 +5,7 @@ Estos documentos se escribieron **antes** del código y se corrigieron cuando un
 Si tiene poco tiempo, el [README](../../README.md) resume lo esencial y estas son las dos paradas que más rápido enseñan el criterio detrás del proyecto:
 
 1. **[08 · Verificación de PostgreSQL](08-verificacion-postgres.md)** — las mediciones que decidieron el modelo de datos, con su salida literal.
-2. **[04 · Arquitectura](04-arquitectura.md)** — los 21 ADRs, cada uno con sus alternativas descartadas.
+2. **[04 · Arquitectura](04-arquitectura.md)** — los 22 ADRs, cada uno con sus alternativas descartadas.
 
 ## Ruta de lectura completa
 
@@ -14,7 +14,7 @@ Si tiene poco tiempo, el [README](../../README.md) resume lo esencial y estas so
 | **01** | [Requisitos](01-requisitos.md) | RF-01…RF-16 y RNF-01…RNF-10 con criterios de aceptación, casos de uso y la lista de lo descartado **con su razón** |
 | **02** | [Modelo de dominio](02-modelo-dominio.md) | DDL completo, por qué `ENUM` y no `text`, la invariante de estado terminal y quién la satisface |
 | **03** | [Contrato de API](03-contrato-api.md) | Los 11 endpoints, el formato RFC 7807, el catálogo de códigos y el mapeo `SQLSTATE`→HTTP |
-| **04** | [Arquitectura](04-arquitectura.md) | Las tres capas de validación, la estructura de carpetas y los 21 ADRs |
+| **04** | [Arquitectura](04-arquitectura.md) | Las tres capas de validación, la estructura de carpetas y los 22 ADRs |
 | **05** | [Estrategia de calidad](05-estrategia-calidad.md) | Dónde se invierte el presupuesto de pruebas, el aislamiento por worker, el pipeline de CI, los quality gates y la matriz de trazabilidad |
 | **08** | [Verificación de PostgreSQL](08-verificacion-postgres.md) | Nueve secciones de mediciones contra PostgreSQL 16.15 y qué cambió en la especificación por cada una |
 
