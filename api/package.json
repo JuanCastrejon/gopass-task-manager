@@ -11,8 +11,8 @@
     "lint": "eslint src tests --max-warnings 0",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "migrate": "node-pg-migrate up",
-    "migrate:down": "node-pg-migrate down",
+    "migrate": "node-pg-migrate --no-single-transaction up",
+    "migrate:down": "node-pg-migrate --no-single-transaction down",
     "seed": "tsx src/db/seed.ts"
   },
   "dependencies": {

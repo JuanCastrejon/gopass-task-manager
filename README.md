@@ -55,7 +55,7 @@ Un `CHECK` verifica la invariante `DONE ⟺ completed_at IS NOT NULL` y un trigg
 **5. Sin ORM y sin librería de enrutado.**
 Dos entidades no justifican una abstracción que oculta el control granular del SQL y los planes de ejecución; el patrón repositorio da el mismo aislamiento. Para el enrutado se midió el coste real de `react-router-dom` en este bundle —**+13.4 KB gzip para dos rutas**— y se resolvió con la History API.
 
-El registro completo son **22 ADRs** en [docs/spec/04-arquitectura.md](docs/spec/04-arquitectura.md), cada uno con su contexto, sus alternativas descartadas y por qué.
+El registro completo son **26 ADRs** en [docs/spec/04-arquitectura.md](docs/spec/04-arquitectura.md), cada uno con su contexto, sus alternativas descartadas y por qué.
 
 ## Arquitectura
 
@@ -79,7 +79,7 @@ Monolito modular con módulos por dominio (`projects`, `tasks`, `stats`).
 
 ## API
 
-Doce endpoints. Errores en `application/problem+json` (RFC 7807) con un `code` estable que el frontend traduce; `X-Request-Id` en **todas** las respuestas, no solo en los fallos.
+Trece endpoints. Errores en `application/problem+json` (RFC 7807) con un `code` estable que el frontend traduce; `X-Request-Id` en **todas** las respuestas, no solo en los fallos.
 
 | | Ruta | |
 |---|---|---|
@@ -88,15 +88,15 @@ Doce endpoints. Errores en `application/problem+json` (RFC 7807) con un `code` e
 | `GET · POST` | `/api/projects` | Listar con avance · crear |
 | `GET · PATCH · DELETE` | `/api/projects/:id` | Detalle · edición parcial · borrado (**409** si tiene tareas) |
 | `GET · POST` | `/api/projects/:id/tasks` | Listar con filtros · crear |
-| `GET · PATCH · DELETE` | `/api/tasks/:id` | Detalle · edición parcial · borrado |
+| `GET · PATCH · DELETE` | `/api/tasks/:id` | Detalle · edición parcial · borrado · reordenación manual (`/reorder`) |
 
 **[docs/api.http](docs/api.http)** es una colección ejecutable: se lanza desde VS Code con REST Client o desde JetBrains y recorre el ciclo completo, incluidos todos los caminos de error. El contrato exhaustivo —payloads, catálogo de códigos y el mapeo `SQLSTATE`→HTTP— está en [docs/spec/03-contrato-api.md](docs/spec/03-contrato-api.md).
 
 ## Calidad
 
 ```
-84 pruebas    73 backend (integración contra PostgreSQL real) · 7 frontend · 4 E2E
-93.8 %        cobertura de líneas del backend funcional
+151 pruebas    117 backend (integración contra PostgreSQL real) · 23 frontend · 11 E2E
+96.93 %       cobertura de líneas del backend funcional
 ```
 
 Las pruebas de integración corren contra PostgreSQL de verdad, no contra un doble del driver: cada worker crea su propia base (`gopass_tasks_test_<id>`), aplica las migraciones y trunca entre casos, así que los archivos siguen ejecutándose en paralelo. Simular el driver probaría el simulador.
@@ -143,7 +143,7 @@ Límites conocidos del diseño actual: en edición concurrente gana la última e
 | [Requisitos y trazabilidad](docs/spec/01-requisitos.md) | RF y RNF con criterios de aceptación; qué queda fuera y por qué |
 | [Modelo de dominio](docs/spec/02-modelo-dominio.md) | DDL completo, invariantes y decisiones de modelado |
 | [Contrato de API](docs/spec/03-contrato-api.md) | Endpoints, errores RFC 7807, mapeo `SQLSTATE`→HTTP |
-| [Arquitectura](docs/spec/04-arquitectura.md) | Capas, estructura y los 22 ADRs |
+| [Arquitectura](docs/spec/04-arquitectura.md) | Capas, estructura y los 26 ADRs |
 | [Estrategia de calidad](docs/spec/05-estrategia-calidad.md) | Pruebas, CI, quality gates y matriz de trazabilidad |
 | [Verificación de PostgreSQL](docs/spec/08-verificacion-postgres.md) | Mediciones contra el motor que decidieron el modelo de datos |
 | [Desarrollo asistido por IA](docs/process/ai-assisted-development.md) | Cómo se trabajó y qué se verificó |

@@ -8,6 +8,7 @@ export interface TaskRow {
   description: string | null;
   status: TaskStatus;
   priority: TaskPriority;
+  position: number;
   completed_at: Date | null;
   created_at: Date;
   updated_at: Date;
@@ -22,6 +23,8 @@ export interface Task {
   description: string | null;
   status: TaskRow['status'];
   priority: TaskRow['priority'];
+  /** Posición de ordenación manual dentro de la columna. */
+  position: number;
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -36,6 +39,7 @@ export function toTask(row: TaskRow): Task {
     description: row.description,
     status: row.status,
     priority: row.priority,
+    position: Number(row.position),
     completedAt: row.completed_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),

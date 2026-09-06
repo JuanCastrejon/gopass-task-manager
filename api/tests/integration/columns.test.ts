@@ -50,6 +50,7 @@ describe('el tablero inicial', () => {
     expect(columnas.map((c) => c.name)).toEqual(['Por hacer', 'En curso', 'Completada']);
     expect(columnas.map((c) => c.category)).toEqual(['TODO', 'IN_PROGRESS', 'DONE']);
     expect(columnas.map((c) => c.position)).toEqual([1, 2, 3]);
+    expect(columnas.map((c) => c.sort)).toEqual(['manual', 'manual', 'manual']);
   });
 
   it('las crea el motor, no el servicio: un INSERT directo también las obtiene', async () => {
@@ -86,7 +87,7 @@ describe('crear columnas', () => {
       .send({ name: 'En revisión', category: 'IN_PROGRESS' });
 
     expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({ name: 'En revisión', category: 'IN_PROGRESS', position: 4 });
+    expect(res.body).toMatchObject({ name: 'En revisión', category: 'IN_PROGRESS', position: 4, sort: 'manual' });
   });
 
   it('admite dos columnas con la misma categoría', async () => {
@@ -334,11 +335,15 @@ describe('orden configurable por columna', () => {
     const columnas = await listar();
     const porHacer = de(columnas, 'TODO');
 
+    await request(app)
+      .patch(`/api/projects/${projectId}/columns/${porHacer.id}`)
+      .send({ sort: 'priority_desc' });
+
     await tareaCon('baja', 'LOW');
     await tareaCon('alta', 'HIGH');
     await tareaCon('media', 'MEDIUM');
 
-    // Por defecto, prioridad alta primero.
+    // Con prioridad alta primero:
     const { body: antes } = await request(app).get(`/api/projects/${projectId}/tasks`);
     expect((antes as Array<{ title: string }>).map((t) => t.title)).toEqual([
       'alta',

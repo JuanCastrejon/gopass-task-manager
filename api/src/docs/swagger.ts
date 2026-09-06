@@ -648,6 +648,62 @@ export const openApiSpec = {
         },
       },
     },
+    '/tasks/{id}/reorder': {
+      patch: {
+        tags: ['Tasks'],
+        summary: 'Reordenar tarea entre dos vecinas o al inicio/fin de columna',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ReorderTaskInput' },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Tarea reordenada exitosamente',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Task' },
+              },
+            },
+          },
+          400: {
+            description: 'Payload inválido o identificadores de tareas inconsistentes',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+          404: {
+            description: 'Tarea, columna destino o tarea vecina inexistente',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+          409: {
+            description: 'La columna destino tiene un límite de trabajo en curso lleno (WIP_LIMIT_REACHED)',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/stats': {
       get: {
         tags: ['Stats'],
@@ -728,7 +784,7 @@ export const openApiSpec = {
           },
           sort: {
             type: 'string',
-            enum: ['priority_desc', 'priority_asc', 'created_desc', 'created_asc'],
+            enum: ['priority_desc', 'priority_asc', 'created_desc', 'created_asc', 'manual'],
             description: 'Criterio de orden de las tareas dentro de la columna. Compartido por el equipo.',
           },
           createdAt: { type: 'string', format: 'date-time' },
@@ -754,7 +810,7 @@ export const openApiSpec = {
           wipLimit: { type: 'integer', nullable: true, minimum: 1, maximum: 100 },
           sort: {
             type: 'string',
-            enum: ['priority_desc', 'priority_asc', 'created_desc', 'created_asc'],
+            enum: ['priority_desc', 'priority_asc', 'created_desc', 'created_asc', 'manual'],
           },
         },
       },
@@ -766,7 +822,7 @@ export const openApiSpec = {
           wipLimit: { type: 'integer', nullable: true, minimum: 1, maximum: 100 },
           sort: {
             type: 'string',
-            enum: ['priority_desc', 'priority_asc', 'created_desc', 'created_asc'],
+            enum: ['priority_desc', 'priority_asc', 'created_desc', 'created_asc', 'manual'],
           },
         },
       },
@@ -787,7 +843,7 @@ export const openApiSpec = {
       },
       Task: {
         type: 'object',
-        required: ['id', 'projectId', 'title', 'status', 'priority', 'completedAt', 'createdAt', 'updatedAt'],
+        required: ['id', 'projectId', 'title', 'status', 'priority', 'position', 'completedAt', 'createdAt', 'updatedAt'],
         properties: {
           id: { type: 'string', format: 'uuid' },
           projectId: { type: 'string', format: 'uuid' },
@@ -800,9 +856,35 @@ export const openApiSpec = {
           description: { type: 'string', nullable: true, example: 'Especificación del protocolo' },
           status: { type: 'string', enum: ['TODO', 'IN_PROGRESS', 'DONE'], example: 'IN_PROGRESS' },
           priority: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'], example: 'HIGH' },
+          position: {
+            type: 'number',
+            format: 'double',
+            description: 'Posición fraccionaria de ordenación manual dentro de la columna.',
+            example: 1024.0,
+          },
           completedAt: { type: 'string', format: 'date-time', nullable: true, example: null },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      ReorderTaskInput: {
+        type: 'object',
+        required: ['columnId', 'previousTaskId', 'nextTaskId'],
+        description: 'Parámetros para reordenar una tarea. Si ambas vecinas son null, la tarea se sitúa al final de la columna (MAX + 1024, o 1024 si está vacía).',
+        properties: {
+          columnId: { type: 'string', format: 'uuid', description: 'Columna destino donde se ubicará la tarea.' },
+          previousTaskId: {
+            type: 'string',
+            format: 'uuid',
+            nullable: true,
+            description: 'Identificador de la tarea inmediatamente anterior, o null si va al inicio (o si ambas son null, al final).',
+          },
+          nextTaskId: {
+            type: 'string',
+            format: 'uuid',
+            nullable: true,
+            description: 'Identificador de la tarea inmediatamente siguiente, o null si va al final.',
+          },
         },
       },
       CreateTaskInput: {

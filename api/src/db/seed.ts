@@ -120,10 +120,11 @@ export async function runSeed(): Promise<{ projects: number; tasks: number }> {
       );
       // Y un orden distinto en la cola de entrada, para que el selector no
       // parezca decorativo: lo más antiguo primero delata lo que lleva ahí
-      // demasiado tiempo.
+      // demasiado tiempo (SL-14), mientras que el resto de columnas quedan en
+      // 'manual' para demostrar la reordenación por arrastre (SL-15).
       await client.query(
         `UPDATE project_columns SET sort = 'created_asc'
-          WHERE project_id = $1 AND category = 'TODO' AND sort = 'priority_desc'`,
+          WHERE project_id = $1 AND category = 'TODO'`,
         [primero.id],
       );
     }

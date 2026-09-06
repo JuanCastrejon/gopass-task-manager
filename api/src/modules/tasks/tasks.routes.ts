@@ -7,10 +7,12 @@ import {
   listTasksQuerySchema,
   patchTaskSchema,
   projectScopedParamsSchema,
+  reorderTaskSchema,
   taskIdParamsSchema,
   type CreateTaskInput,
   type ListTasksQuery,
   type PatchTaskInput,
+  type ReorderTaskInput,
 } from './tasks.schema.js';
 
 /**
@@ -65,6 +67,18 @@ tasksRouter.patch(
   (req, res, next) => {
     repo
       .updateTask(req.params['id'] as string, req.body as PatchTaskInput)
+      .then((row) => res.json(toTask(row)))
+      .catch(next);
+  },
+);
+
+tasksRouter.patch(
+  '/:id/reorder',
+  validateParams(taskIdParamsSchema),
+  validateBody(reorderTaskSchema),
+  (req, res, next) => {
+    repo
+      .reorderTask(req.params['id'] as string, req.body as ReorderTaskInput)
       .then((row) => res.json(toTask(row)))
       .catch(next);
   },

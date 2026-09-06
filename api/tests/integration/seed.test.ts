@@ -72,4 +72,17 @@ describe('seed de datos de demostración (RF-16)', () => {
       else expect(t.completed_at).toBeNull();
     }
   });
+
+  it('la demo incluye al menos una columna con orden automático y al menos una con manual', async () => {
+    await runSeed();
+
+    const { rows } = await pool.query<{ sort: string }>(
+      'SELECT sort FROM project_columns',
+    );
+    const automaticas = rows.filter((r) => r.sort !== 'manual');
+    const manuales = rows.filter((r) => r.sort === 'manual');
+
+    expect(automaticas.length).toBeGreaterThan(0);
+    expect(manuales.length).toBeGreaterThan(0);
+  });
 });

@@ -93,7 +93,7 @@ export async function createColumn(
         `INSERT INTO project_columns (project_id, name, category, position, wip_limit, sort)
          VALUES ($1, $2, $3::task_status,
                  (SELECT COALESCE(MAX(position), 0) + 1 FROM project_columns WHERE project_id = $1),
-                 $4, COALESCE($5::column_sort, 'priority_desc'))
+                 $4, COALESCE($5::column_sort, 'manual'))
          RETURNING ${COLUMN_FIELDS}`,
         [projectId, input.name, input.category, input.wipLimit ?? null, input.sort ?? null],
       );
