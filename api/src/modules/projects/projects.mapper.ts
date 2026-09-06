@@ -9,7 +9,6 @@ export interface ProjectRow {
   id: string;
   name: string;
   description: string | null;
-  wip_limit: number | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -17,7 +16,6 @@ export interface ProjectRow {
 export interface ProjectSummaryRow extends ProjectRow {
   task_count: number;
   done_count: number;
-  in_progress_count: number;
   low_count: number;
   medium_count: number;
   high_count: number;
@@ -28,8 +26,6 @@ export interface Project {
   id: string;
   name: string;
   description: string | null;
-  /** Máximo de tareas simultáneas en curso. `null` es «sin límite». */
-  wipLimit: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -37,8 +33,6 @@ export interface Project {
 export interface ProjectSummary extends Project {
   taskCount: number;
   doneCount: number;
-  /** Cuántas tareas hay ahora mismo en curso. Es el numerador del límite. */
-  inProgressCount: number;
   /**
    * Cuántas tareas de cada prioridad tiene el proyecto. Las tres claves están
    * siempre presentes, también cuando valen 0: un consumidor no debería tener
@@ -57,7 +51,6 @@ export function toProject(row: ProjectRow): Project {
     id: row.id,
     name: row.name,
     description: row.description,
-    wipLimit: row.wip_limit,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -68,7 +61,6 @@ export function toProjectSummary(row: ProjectSummaryRow): ProjectSummary {
     ...toProject(row),
     taskCount: row.task_count,
     doneCount: row.done_count,
-    inProgressCount: row.in_progress_count,
     byPriority: {
       LOW: row.low_count,
       MEDIUM: row.medium_count,

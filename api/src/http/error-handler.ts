@@ -23,6 +23,10 @@ const TITLES: Record<ErrorCode, string> = {
   PROJECT_NAME_TAKEN: 'Nombre de proyecto en uso',
   PROJECT_HAS_TASKS: 'El proyecto tiene tareas asociadas',
   WIP_LIMIT_REACHED: 'Límite de trabajo en curso alcanzado',
+  COLUMN_NOT_FOUND: 'Columna no encontrada',
+  COLUMN_HAS_TASKS: 'La columna tiene tareas asociadas',
+  COLUMN_NAME_TAKEN: 'Nombre de columna en uso',
+  LAST_COLUMN_OF_CATEGORY: 'Última columna de su categoría',
   ROUTE_NOT_FOUND: 'Ruta no encontrada',
   INTERNAL_ERROR: 'Error interno',
 };

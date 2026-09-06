@@ -80,6 +80,36 @@ CREATE TRIGGER project_columns_set_updated_at
   BEFORE UPDATE ON project_columns
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+-- ------------------------------------------------------------------ trigger
+-- Todo proyecto nace con su tablero.
+--
+-- Mismo criterio que el trigger de `completed_at`: crear las columnas solo
+-- desde el servicio dejaría fuera al seed, a `psql` y a cualquier otro
+-- cliente, y un proyecto sin columnas no es un tablero vacío sino un tablero
+-- roto, en el que no se puede crear ni una tarea.
+--
+-- `AFTER INSERT` y no `BEFORE`: las columnas referencian al proyecto por clave
+-- foránea, así que la fila tiene que existir antes de insertarlas.
+--
+-- El límite que se declare al crear el proyecto se aplica a la columna de
+-- trabajo en curso, que es a la que se refería cuando el límite vivía en el
+-- proyecto.
+
+CREATE FUNCTION create_default_project_columns() RETURNS trigger AS $$
+BEGIN
+  INSERT INTO project_columns (project_id, name, category, position)
+  VALUES
+    (NEW.id, 'Por hacer',  'TODO',        1),
+    (NEW.id, 'En curso',   'IN_PROGRESS', 2),
+    (NEW.id, 'Completada', 'DONE',        3);
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER projects_create_default_columns
+  AFTER INSERT ON projects
+  FOR EACH ROW EXECUTE FUNCTION create_default_project_columns();
+
 -- ------------------------------------------------- columnas de los proyectos
 -- Todo proyecto existente recibe las tres columnas que ya tenía de facto, con
 -- los mismos nombres que mostraba la interfaz. Sin esto, un proyecto ya creado
@@ -97,6 +127,32 @@ CROSS JOIN (VALUES
   ('Completada', 'DONE'::task_status,        3)
 ) AS c(name, category, position);
 
+-- --------------------------------------------- el limite se muda a la columna
+-- `projects.wip_limit` desaparece.
+--
+-- La migracion 0002 lo introdujo a nivel de proyecto, aplicado solo a
+-- `IN_PROGRESS`. Con columnas configurables ese diseno se queda corto —«QA»
+-- necesita su propio limite, distinto del de «Desarrollo»— y conservarlo
+-- ademas dejaria dos sitios donde declarar la misma cosa: un campo que solo
+-- surte efecto al crear el proyecto y que despues nadie puede cambiar. Un
+-- concepto, un lugar.
+--
+-- El valor ya se copio arriba a la columna «En curso» de cada proyecto, asi
+-- que no se pierde ningun limite declarado.
+
+ALTER TABLE projects DROP COLUMN wip_limit;
+
 -- Down Migration
 
+ALTER TABLE projects ADD COLUMN wip_limit integer;
+ALTER TABLE projects
+  ADD CONSTRAINT projects_wip_limit_positive
+    CHECK (wip_limit IS NULL OR wip_limit > 0);
+UPDATE projects p
+   SET wip_limit = (SELECT pc.wip_limit FROM project_columns pc
+                     WHERE pc.project_id = p.id AND pc.category = 'IN_PROGRESS'
+                     ORDER BY pc.position LIMIT 1);
+
+DROP TRIGGER IF EXISTS projects_create_default_columns ON projects;
+DROP FUNCTION IF EXISTS create_default_project_columns();
 DROP TABLE IF EXISTS project_columns;

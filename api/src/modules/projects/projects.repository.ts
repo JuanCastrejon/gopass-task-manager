@@ -4,7 +4,7 @@ import { ProjectHasTasksError, ProjectNotFoundError } from '../../http/errors.js
 import type { ProjectRow, ProjectSummaryRow } from './projects.mapper.js';
 import type { CreateProjectInput, PatchProjectInput } from './projects.schema.js';
 
-const PROJECT_FIELDS = 'id, name, description, wip_limit, created_at, updated_at';
+const PROJECT_FIELDS = 'id, name, description, created_at, updated_at';
 
 /**
  * `COUNT(*)` devuelve `bigint`, y el driver `pg` entrega los `bigint` como
@@ -32,10 +32,9 @@ const PROJECT_FIELDS = 'id, name, description, wip_limit, created_at, updated_at
  * convierte en 0 el NULL del proyecto sin tareas.
  */
 const SUMMARY_QUERY = `
-  SELECT p.id, p.name, p.description, p.wip_limit, p.created_at, p.updated_at,
+  SELECT p.id, p.name, p.description, p.created_at, p.updated_at,
          COALESCE(t.total, 0)::int         AS task_count,
          COALESCE(t.done,  0)::int         AS done_count,
-         COALESCE(t.in_progress, 0)::int   AS in_progress_count,
          COALESCE(t.low,    0)::int        AS low_count,
          COALESCE(t.medium, 0)::int        AS medium_count,
          COALESCE(t.high,   0)::int        AS high_count,
@@ -47,7 +46,6 @@ const SUMMARY_QUERY = `
     SELECT project_id,
            COUNT(t.id)                                        AS total,
            COUNT(t.id) FILTER (WHERE t.status = 'DONE')       AS done,
-           COUNT(t.id) FILTER (WHERE t.status = 'IN_PROGRESS') AS in_progress,
            COUNT(t.id) FILTER (WHERE t.priority = 'LOW')      AS low,
            COUNT(t.id) FILTER (WHERE t.priority = 'MEDIUM')   AS medium,
            COUNT(t.id) FILTER (WHERE t.priority = 'HIGH')     AS high
@@ -76,30 +74,26 @@ export async function findProjectById(id: string): Promise<ProjectSummaryRow> {
 export async function createProject(input: CreateProjectInput): Promise<ProjectRow> {
   try {
     const result = await pool.query<ProjectRow>(
-      `INSERT INTO projects (name, description, wip_limit)
-       VALUES ($1, $2, $3)
+      `INSERT INTO projects (name, description)
+       VALUES ($1, $2)
        RETURNING ${PROJECT_FIELDS}`,
-      [input.name, input.description ?? null, input.wipLimit ?? null],
+      [input.name, input.description ?? null],
     );
     // `INSERT ... RETURNING` siempre devuelve la fila creada o lanza.
+    //
+    // Las tres columnas iniciales del tablero **no se crean aquí**: las pone un
+    // trigger `AFTER INSERT` sobre `projects`. Hacerlo desde el servicio
+    // dejaría fuera al seed, a `psql` y a cualquier otro cliente, que es el
+    // mismo motivo por el que `completed_at` lo sella el motor y no la
+    // aplicación. Un proyecto sin columnas no sería un tablero vacío sino uno
+    // roto, donde no se puede crear ni una tarea.
     return result.rows[0]!;
   } catch (err) {
     throw translatePgError(err) ?? err;
   }
 }
 
-/**
- * Columnas actualizables. El nombre de la columna sale SIEMPRE de este mapa,
- * nunca del payload: la clave del objeto se usa solo para elegir una entrada
- * ya escrita aquí, así que no hay superficie de inyección aunque el SQL se
- * componga.
- *
- * Se descartó `SET name = COALESCE($2, name)`, que evita componer la
- * sentencia pero hace imposible borrar una descripción existente: con
- * `COALESCE`, `null` significa "no lo toques" y no queda forma de expresar
- * "déjalo vacío".
- */
-const UPDATABLE = { name: 'name', description: 'description', wipLimit: 'wip_limit' } as const;
+const UPDATABLE = { name: 'name', description: 'description' } as const;
 
 export async function updateProject(id: string, patch: PatchProjectInput): Promise<ProjectRow> {
   const assignments: string[] = [];

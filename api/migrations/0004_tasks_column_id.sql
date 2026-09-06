@@ -54,11 +54,54 @@ ALTER TABLE tasks
 -- imponer el límite de trabajo en curso.
 CREATE INDEX tasks_column_id_idx ON tasks (column_id);
 
+-- ------------------------------------------------------------------ trigger
+-- Una tarea insertada sin columna se coloca en la primera de su categoría.
+--
+-- Mismo criterio que el trigger de `completed_at`, y por el mismo motivo:
+-- derivar la columna solo desde el servicio dejaría fuera al seed, a `psql` y
+-- a cualquier otro cliente, y un `NOT NULL` sin valor por defecto convertiría
+-- cada `INSERT` directo en un error. Con esto, `INSERT INTO tasks
+-- (project_id, title, status)` sigue funcionando exactamente igual que antes
+-- de que existieran las columnas.
+--
+-- No suple a la aplicación: cuando el cliente indica columna, se respeta. Solo
+-- rellena el hueco cuando nadie la ha dicho.
+
+CREATE FUNCTION set_task_column_from_status() RETURNS trigger AS $$
+BEGIN
+  IF NEW.column_id IS NULL THEN
+    SELECT id INTO NEW.column_id
+      FROM project_columns
+     WHERE project_id = NEW.project_id
+       AND category   = NEW.status
+     ORDER BY position
+     LIMIT 1;
+
+    IF NEW.column_id IS NULL THEN
+      RAISE EXCEPTION 'El proyecto % no tiene ninguna columna de categoria %',
+        NEW.project_id, NEW.status
+        USING ERRCODE = '23502';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- `BEFORE INSERT OR UPDATE OF project_id`: al reasignar una tarea a otro
+-- proyecto, su columna anterior pertenece al proyecto de origen y la clave
+-- foránea compuesta la rechazaría. Poniendo `column_id` a NULL en el UPDATE,
+-- el trigger la recoloca en la columna equivalente del proyecto destino.
+CREATE TRIGGER tasks_set_column_from_status
+  BEFORE INSERT OR UPDATE OF project_id, column_id ON tasks
+  FOR EACH ROW EXECUTE FUNCTION set_task_column_from_status();
+
 -- El índice de (project_id, status) que creó la migración 0002 sigue sirviendo
 -- a `/stats` y a los filtros por estado, así que se conserva.
 
 -- Down Migration
 
+DROP TRIGGER IF EXISTS tasks_set_column_from_status ON tasks;
+DROP FUNCTION IF EXISTS set_task_column_from_status();
 DROP INDEX IF EXISTS tasks_column_id_idx;
 ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_column_category_fkey;
 ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_project_column_fkey;
