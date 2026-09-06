@@ -21,11 +21,6 @@ const PROJECTS = [
     id: '5b1f0a10-0000-4000-8000-000000000001',
     name: 'Telepeaje — integración de operadores',
     description: 'Conexión con concesionarios viales y homologación de lectores TAG.',
-    // El único con límite de trabajo en curso, para que la regla se vea nada
-    // más abrir la aplicación (RF-16) y no solo si alguien la configura. Es 2
-    // y hay 1 tarea en curso: el contador muestra «1/2» sin estar bloqueado,
-    // así se ve el estado normal y basta mover una más para ver el 409.
-    wipLimit: 2,
   },
   {
     id: '5b1f0a10-0000-4000-8000-000000000002',
@@ -68,10 +63,10 @@ export async function runSeed(): Promise<{ projects: number; tasks: number }> {
     let projects = 0;
     for (const p of PROJECTS) {
       const res = await client.query(
-        `INSERT INTO projects (id, name, description, wip_limit)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO projects (id, name, description)
+         VALUES ($1, $2, $3)
          ON CONFLICT (id) DO NOTHING`,
-        [p.id, p.name, p.description, 'wipLimit' in p ? p.wipLimit : null],
+        [p.id, p.name, p.description],
       );
       projects += res.rowCount ?? 0;
     }
@@ -87,6 +82,50 @@ export async function runSeed(): Promise<{ projects: number; tasks: number }> {
         [id, project.id, title, status, priority],
       );
       tasks += res.rowCount ?? 0;
+    }
+
+    /**
+     * Un tablero de ejemplo que no sea el de por defecto.
+     *
+     * Sin esto, las columnas configurables y el límite de trabajo en curso solo
+     * se verían si alguien los configura, y RF-16 pide que la aplicación abra
+     * mostrando lo que sabe hacer. Se aplica solo al primer proyecto: los otros
+     * tres conservan el tablero de tres columnas, que es el caso habitual.
+     *
+     * Con `WHERE NOT EXISTS` y no con `ON CONFLICT`: el índice de posición es
+     * `DEFERRABLE` —lo necesita el reordenamiento, que intercambia posiciones
+     * dentro de una transacción— y PostgreSQL no admite un índice diferible
+     * como árbitro de `ON CONFLICT`. La guarda explícita consigue lo mismo:
+     * sembrar dos veces no duplica la columna ni revierte lo que alguien haya
+     * cambiado desde la interfaz.
+     */
+    const [primero] = PROJECTS;
+    if (primero) {
+      await client.query(
+        `INSERT INTO project_columns (project_id, name, category, position, wip_limit)
+         SELECT $1, 'En revisión', 'IN_PROGRESS', 4, 2
+          WHERE NOT EXISTS (
+            SELECT 1 FROM project_columns
+             WHERE project_id = $1 AND lower(btrim(name)) = 'en revisión'
+          )`,
+        [primero.id],
+      );
+      // «En curso» con límite 2 y una sola tarea dentro: se ve el contador
+      // «1/2» sin estar bloqueado, y basta mover una más para ver el 409.
+      await client.query(
+        `UPDATE project_columns SET wip_limit = 2
+          WHERE project_id = $1 AND category = 'IN_PROGRESS' AND position = 2
+            AND wip_limit IS NULL`,
+        [primero.id],
+      );
+      // Y un orden distinto en la cola de entrada, para que el selector no
+      // parezca decorativo: lo más antiguo primero delata lo que lleva ahí
+      // demasiado tiempo.
+      await client.query(
+        `UPDATE project_columns SET sort = 'created_asc'
+          WHERE project_id = $1 AND category = 'TODO' AND sort = 'priority_desc'`,
+        [primero.id],
+      );
     }
 
     await client.query('COMMIT');

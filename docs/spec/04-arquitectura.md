@@ -260,6 +260,11 @@ La alternativa (`controllers/`, `services/`, `repositories/` en la raíz, con to
 
 ### ADR-022 — Límite de trabajo en curso, impuesto por el motor y no por la interfaz
 
+> **Revisado por ADR-023.** El límite dejó de vivir en el proyecto y bajó a la columna al llegar
+> las columnas configurables: «Desarrollo» máximo 3 y «QA» máximo 2 es una política real que un
+> único límite por proyecto no puede expresar. Todo lo que este ADR decide sobre la concurrencia y
+> el bloqueo sigue vigente; solo cambia la fila que se bloquea.
+
 **Contexto.** El tablero tenía tres columnas y ninguna regla de flujo. Un tablero sin límite de
 trabajo en curso dibuja columnas pero no gestiona nada: el límite es la idea central del método
 kanban, y lo que hace visible el cuello de botella antes de que el trabajo se acumule.
@@ -295,6 +300,98 @@ habilitado a propósito y el servidor responde 409, que es la señal que el mét
 **Consecuencia.** La cabecera de «En curso» muestra `1/2` y pasa a rojo al alcanzarse. Poner un
 límite por debajo del uso actual **no expulsa tareas**: muestra el exceso y bloquea las entradas
 nuevas, que es lo que hace un tablero real cuando un equipo aprieta su límite.
+
+### ADR-023 — Columnas configurables sin renunciar a las garantías del ENUM
+
+**Contexto.** El tablero tenía tres columnas porque las columnas **eran** el `ENUM task_status`.
+De ese enum cuelgan cuatro garantías: el `CHECK` de `completed_at`, el trigger que lo sella, el
+`enum_range` con el que `/stats` asegura que un estado sin tareas salga con 0, y el límite de
+trabajo en curso. Permitir añadir y eliminar columnas obliga a decidir qué pasa con las cuatro.
+
+**Decisión.** Tabla `project_columns` con `category task_status NOT NULL`. El enum **no
+desaparece**: pasa a ser la categoría de ciclo de vida de cada columna, y varias columnas pueden
+compartirla. La unión se impone con una clave foránea compuesta:
+
+```sql
+FOREIGN KEY (column_id, status) REFERENCES project_columns (id, category)
+```
+
+**Verificado contra PostgreSQL** que el motor rechaza las dos formas de divergencia —mover a una
+columna terminal sin cambiar el estado, y cambiar el estado sin mover de columna— y solo acepta el
+cambio atómico de ambos. Sin ella, `status` y `column_id` serían dos fuentes de verdad que
+acabarían divergiendo: una tarea marcada como completada colgando de «En curso».
+
+**Alternativa descartada: eliminar el enum y sustituirlo por `is_terminal boolean`.** Es lo que
+proponía una de las dos revisiones, con el argumento de que clasificar «En revisión» o «Bloqueada»
+en tres categorías globales es artificial. Se descartó por dos evidencias:
+
+| | Archivos a tocar | Reversible |
+|---|---|---|
+| Eliminar el enum | **16** | la migración de retirada, **no** |
+| Conservarlo como categoría | **9** | sí, comprobado |
+
+Y porque el argumento es falso: **es el modelo de Jira**, donde cada estado personalizado declara
+una de exactamente tres categorías —To Do, In Progress, Done— y Atlassian se niega por diseño a
+permitir más. La categoría es justamente lo que hace posible informar entre proyectos con tableros
+distintos, que es lo que aquí protege a `/stats`.
+
+**Dos triggers, por la misma razón que el de `completed_at`.** Una regla que solo viva en el
+servicio deja fuera al seed, a `psql` y a cualquier otro cliente:
+
+- `projects_create_default_columns` — todo proyecto nace con sus tres columnas. Un proyecto sin
+  columnas no es un tablero vacío sino uno roto, donde no se puede crear ni una tarea.
+- `tasks_set_column_from_status` — una tarea insertada sin columna se coloca en la primera de su
+  categoría. Gracias a él, `INSERT INTO tasks (project_id, title, status)` sigue funcionando igual
+  que antes, y las 85 pruebas que ya existían no necesitaron reescribirse.
+
+**La categoría no se puede cambiar después de crear la columna.** Cambiarla exigiría mover a la vez
+el `status` de todas sus tareas —la clave foránea compuesta las mantiene unidas—, y hacerlo en
+silencio sellaría o borraría fechas de completado por efecto colateral.
+
+**Borrar una columna sigue el precedente de ADR-003.** Sin destino explícito, `409
+COLUMN_HAS_TASKS` con el recuento; con `?reassignTo=`, mover y borrar ocurren en la misma
+transacción y se respeta el límite del destino. Y no se puede eliminar la última columna de una
+categoría: sin `DONE` no habría forma de dar nada por terminado.
+
+**Consecuencia.** Las flechas de la tarjeta pasan a ser contiguas **por posición** y siguen
+cumpliendo WCAG 2.5.7 con N columnas —se llega a cualquiera paso a paso—; el salto directo va por
+el desplegable del diálogo. La rejilla pasa a `grid-flow-col` con `auto-cols-[minmax(16rem,1fr)]`,
+porque `grid-cols-3` colapsaba al añadir la cuarta.
+
+### ADR-024 — El orden de las tareas es configuración de la columna, no del navegador
+
+**Contexto.** Cada etapa se lee con una pregunta distinta: en la cola de entrada interesa qué tomar
+a continuación; en el trabajo en curso, qué lleva más tiempo atascado; en el archivo, lo recién
+terminado. Un criterio único para todo el tablero obliga a un compromiso en las tres.
+
+**Decisión.** `project_columns.sort`, un `ENUM column_sort` con cuatro criterios. Es configuración
+compartida del tablero, no preferencia de quien mira.
+
+**Por qué no `localStorage`.** Es lo que proponía una de las dos revisiones. No se comparte por
+enlace, no sobrevive a cambiar de equipo o navegador, y contradice ADR-019, que fijó que el estado
+del tablero vive en un sitio compartible. Las columnas ya son configuración del equipo; su orden
+también lo es.
+
+**Por qué no un único selector para todo el tablero, en la URL.** Es lo que proponía la otra
+revisión, con el argumento de que un orden por columna exigiría N consultas o penalizar la caché.
+**Se midió y es falso:** una sola consulta sirve un orden distinto por columna mediante una escalera
+de `CASE` sobre `pc.sort`, donde cada rama devuelve NULL salvo la del criterio activo.
+
+```sql
+ORDER BY pc.position,
+  CASE pc.sort WHEN 'priority_asc'  THEN t.priority   END ASC,
+  CASE pc.sort WHEN 'priority_desc' THEN t.priority   END DESC,
+  CASE pc.sort WHEN 'created_asc'   THEN t.created_at END ASC,
+  CASE pc.sort WHEN 'created_desc'  THEN t.created_at END DESC,
+  t.created_at DESC, t.id
+```
+
+Comprobado con tres columnas y tres criterios distintos en una sola pasada. El desempate final
+mantiene el orden estable cuando el criterio elegido empata, para que dos cargas seguidas no
+intercambien tarjetas.
+
+**No se ofrece orden alfabético.** No responde a ninguna decisión de trabajo —nadie elige qué hacer
+por la letra inicial— y solo añadiría relleno al selector.
 
 ### ADR-005 (matiz) — Escribir la respuesta confirmada en la caché no es optimismo
 
@@ -428,7 +525,7 @@ se retira la proyección y la tarjeta reaparece donde el servidor dice que está
 | Modales | elemento nativo `<dialog>` | — |
 | Arrastre | `@dnd-kit/core` (ADR-021) | 6.3.1 |
 | Pruebas | Vitest + Supertest | — |
-| E2E | Playwright (6 escenarios) | — |
+| E2E | Playwright (9 escenarios) | — |
 | CI | GitHub Actions | — |
 | Gates | `sistema-multiagente-sdlc` (`quality-gate`, `coverage-diff`) | 2.2.2 |
 | Gestor de paquetes | npm | 10.x |

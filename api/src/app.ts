@@ -2,6 +2,7 @@ import express, { type Express } from 'express';
 import { pingDatabase } from './db/pool.js';
 import { errorHandler, notFoundHandler } from './http/error-handler.js';
 import { requestId } from './http/request-id.js';
+import { projectColumnsRouter } from './modules/columns/columns.routes.js';
 import { projectsRouter } from './modules/projects/projects.routes.js';
 import { statsRouter } from './modules/stats/stats.routes.js';
 import { projectTasksRouter, tasksRouter } from './modules/tasks/tasks.routes.js';
@@ -40,6 +41,7 @@ export function createApp(): Express {
 
   // El anidado va primero: Express evalúa en orden de registro y
   // `/api/projects/:projectId/tasks` es más específico que `/api/projects`.
+  app.use('/api/projects/:projectId/columns', projectColumnsRouter);
   app.use('/api/projects/:projectId/tasks', projectTasksRouter);
   app.use('/api/projects', projectsRouter);
   app.use('/api/tasks', tasksRouter);

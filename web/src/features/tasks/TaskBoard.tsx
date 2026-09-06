@@ -10,25 +10,39 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import { Plus } from 'lucide-react';
+import { Columns3, Plus } from 'lucide-react';
 import { Button } from '../../components/ui/Button.tsx';
 import { ErrorState, Skeleton } from '../../components/ui/States.tsx';
-import { STATUS_LABEL, StatusDot } from '../../components/ui/Badge.tsx';
+import { StatusDot } from '../../components/ui/Badge.tsx';
 import { CampoBusqueda, GrupoDePrioridad } from '../../components/ui/Filtros.tsx';
 import { messageFor } from '../../lib/error-messages.ts';
 import { useFiltrosDeUrl } from '../../lib/use-filtros-de-url.ts';
-import { TASK_STATUSES, type Task, type TaskStatus } from '../../types/api.ts';
+import {
+  COLUMN_SORTS,
+  COLUMN_SORT_LABEL,
+  type ColumnSort,
+  type ProjectColumnSummary,
+  type Task,
+} from '../../types/api.ts';
+import { useUpdateColumn } from '../columns/api.ts';
+import { ColumnManagerDialog } from '../columns/ColumnManagerDialog.tsx';
 import { TaskCard } from './TaskCard.tsx';
 import { TaskFormDialog } from './TaskFormDialog.tsx';
 import { useDeleteTask, useTasks, useUpdateTask } from './api.ts';
 
 export function TaskBoard({
   projectId,
-  wipLimit,
+  columnas,
 }: {
   projectId: string;
-  /** Límite de trabajo en curso del proyecto. `null` es «sin límite». */
-  wipLimit: number | null;
+  /**
+   * Las columnas del tablero, ya ordenadas por posición.
+   *
+   * Antes eran la constante `TASK_STATUSES`: tres, fijas y globales. Ahora son
+   * datos del proyecto, así que el tablero deja de conocer su propia forma y
+   * la recibe.
+   */
+  columnas: ProjectColumnSummary[];
 }) {
   /**
    * Los filtros viven en la URL, no en `useState`: así el tablero filtrado
@@ -55,7 +69,9 @@ export function TaskBoard({
   const mover = useUpdateTask();
   const borrar = useDeleteTask();
 
-  const [creandoEn, setCreandoEn] = useState<TaskStatus | null>(null);
+  const [creandoEn, setCreandoEn] = useState<ProjectColumnSummary | null>(null);
+  const [gestionando, setGestionando] = useState(false);
+  const cambiarColumna = useUpdateColumn(projectId);
   const [editando, setEditando] = useState<Task | null>(null);
   const [moviendoId, setMoviendoId] = useState<string | null>(null);
   const [recienMovida, setRecienMovida] = useState<string | null>(null);
@@ -75,7 +91,7 @@ export function TaskBoard({
    * Al no haber predicción en la caché, el error no necesita rollback: basta
    * con retirar la proyección y la tarjeta reaparece donde el servidor dice.
    */
-  const [proyeccion, setProyeccion] = useState<{ id: string; destino: TaskStatus } | null>(null);
+  const [proyeccion, setProyeccion] = useState<{ id: string; destino: string } | null>(null);
 
   const carruselRef = useRef<HTMLDivElement>(null);
 
@@ -100,12 +116,16 @@ export function TaskBoard({
    * tarjeta se enfoca a sí misma (ADR-018). Con el arrastre no: el puntero no
    * ha perdido nada y robarle el foco pintaría un anillo que nadie pidió.
    */
-  function moverTarea(task: Task, status: TaskStatus, origen: 'flecha' | 'arrastre' = 'flecha'): void {
+  function moverTarea(task: Task, columnId: string, origen: 'flecha' | 'arrastre' = 'flecha'): void {
     if (moviendoId !== null) return; // reentrada por doble clic rápido
     setMoviendoId(task.id);
-    if (origen === 'arrastre') setProyeccion({ id: task.id, destino: status });
+    if (origen === 'arrastre') setProyeccion({ id: task.id, destino: columnId });
+    // Se manda `columnId` y no `status`: con varias columnas de la misma
+    // categoría, solo el identificador dice a cuál va. El servidor deriva el
+    // estado de la columna, porque la clave foránea compuesta los mantiene
+    // unidos.
     mover.mutate(
-      { id: task.id, patch: { status } },
+      { id: task.id, patch: { columnId } },
       {
         onSuccess: () => {
           if (origen === 'flecha') setRecienMovida(task.id);
@@ -130,11 +150,11 @@ export function TaskBoard({
    */
   function alSoltar(evento: DragEndEvent): void {
     setArrastrada(null);
-    const destino = evento.over?.id as TaskStatus | undefined;
+    const destino = evento.over?.id as string | undefined;
     if (!destino) return;
 
     const task = tareas.data?.find((t) => t.id === evento.active.id);
-    if (!task || task.status === destino) return;
+    if (!task || task.columnId === destino) return;
 
     // A diferencia de las flechas, que solo ofrecen la transición contigua por
     // espacio en la tarjeta, aquí se permite cualquier columna: soltar en
@@ -180,6 +200,10 @@ export function TaskBoard({
             onChange={cambiarPrioridad}
             ariaLabel="Filtrar tareas por prioridad"
           />
+          <Button variant="secondary" size="sm" onClick={() => setGestionando(true)}>
+            <Columns3 className="size-3.5" aria-hidden />
+            Columnas
+          </Button>
         </div>
       </div>
 
@@ -197,9 +221,9 @@ export function TaskBoard({
       )}
 
       {tareas.isPending && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          {TASK_STATUSES.map((s) => (
-            <div key={s} className="space-y-2 rounded-xl border border-border bg-canvas/60 p-3">
+        <div className="grid grid-cols-1 gap-4 lg:grid-flow-col lg:auto-cols-[minmax(16rem,1fr)]">
+          {columnas.map((c) => (
+            <div key={c.id} className="space-y-2 rounded-xl border border-border bg-canvas/60 p-3">
               <Skeleton className="h-3 w-24" />
               <Skeleton className="h-16 w-full rounded-lg" />
               <Skeleton className="h-16 w-full rounded-lg" />
@@ -237,67 +261,109 @@ export function TaskBoard({
              * autoscroll desplaza el carrusel, el navegador tira de vuelta
              * hacia la columna centrada y la tarjeta da saltos.
              */
+            /**
+             * `grid-flow-col` con `auto-cols-[minmax(16rem,1fr)]` y no
+             * `grid-cols-3`: con columnas configurables el número deja de ser
+             * conocido, y una rejilla de tres columnas fijas colapsaría al
+             * añadir la cuarta. Así, hasta cuatro o cinco se reparten el ancho
+             * y a partir de ahí el tablero se desplaza en horizontal
+             * conservando 256 px legibles por columna.
+             */
             className={`flex gap-4 overflow-x-auto pb-3
-                       lg:grid lg:grid-cols-3 lg:overflow-visible lg:pb-0
+                       lg:grid lg:grid-flow-col lg:auto-cols-[minmax(16rem,1fr)] lg:pb-0
                        ${arrastrada ? 'snap-none' : 'snap-x snap-mandatory'}`}
           >
-          {TASK_STATUSES.map((estado) => {
-            // El estado que se pinta es el proyectado, no el confirmado: es lo
+          {columnas.map((col, indice) => {
+            // La columna que se pinta es la proyectada, no la confirmada: es lo
             // que hace que la tarjeta se quede donde la sueltas.
-            const columna = tareas.data.filter(
-              (t) => (proyeccion?.id === t.id ? proyeccion.destino : t.status) === estado,
+            const dentro = tareas.data.filter(
+              (t) => (proyeccion?.id === t.id ? proyeccion.destino : t.columnId) === col.id,
             );
+            // Contiguas por posición en el tablero, no por un mapa fijo de
+            // estados: con columnas configurables la transición «siguiente»
+            // depende de este tablero concreto.
+            const anterior = columnas[indice - 1] ?? null;
+            const siguiente = columnas[indice + 1] ?? null;
             return (
               // Cada columna es una región con nombre propio. Sin esto, un
               // lector de pantalla anuncia tres secciones indistinguibles y
               // los tres botones «Añadir» suenan igual.
-              <ColumnaDestino key={estado} estado={estado} arrastrando={arrastrada !== null}>
+              <ColumnaDestino key={col.id} columna={col} arrastrando={arrastrada !== null}>
                 <header className="mb-2.5 flex items-center gap-2 px-0.5">
-                  <StatusDot status={estado} />
-                  <h3 className="text-xs font-medium uppercase tracking-wide text-ink-muted">
-                    {STATUS_LABEL[estado]}
+                  {/* El punto sigue el color de la CATEGORÍA, no del nombre:
+                      «QA» y «En revisión» son ambas trabajo en curso y deben
+                      leerse como tal de un vistazo. */}
+                  <StatusDot status={col.category} />
+                  <h3 className="min-w-0 truncate text-xs font-medium uppercase tracking-wide text-ink-muted" title={col.name}>
+                    {col.name}
                   </h3>
                   {/*
-                    El límite se muestra solo en «En curso», que es la única
-                    columna donde significa algo: «Por hacer» es la cola de
-                    entrada y «Completada» el archivo. Un contador «2/3» junto a
-                    la columna limitada es la forma en que un tablero kanban
-                    hace visible el cuello de botella antes de chocar con él.
+                    El límite se muestra solo donde se declaró. Un contador
+                    «2/3» junto a la columna limitada es la forma en que un
+                    tablero kanban hace visible el cuello de botella antes de
+                    chocar con él.
                   */}
-                  {estado === 'IN_PROGRESS' && wipLimit !== null ? (
+                  {col.wipLimit !== null ? (
                     <span
-                      className={`ml-auto rounded px-1.5 py-0.5 text-xs font-medium tabular-nums ${
-                        columna.length >= wipLimit
-                          ? 'bg-danger-soft text-danger'
-                          : 'text-ink-muted'
+                      className={`ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs font-medium tabular-nums ${
+                        dentro.length >= col.wipLimit ? 'bg-danger-soft text-danger' : 'text-ink-muted'
                       }`}
-                      title={`${columna.length} de un máximo de ${wipLimit} en curso`}
+                      title={`${dentro.length} de un máximo de ${col.wipLimit} en ${col.name}`}
                     >
-                      {columna.length}/{wipLimit}
+                      {dentro.length}/{col.wipLimit}
                     </span>
                   ) : (
-                    <span className="ml-auto text-xs tabular-nums text-ink-muted">
-                      {columna.length}
+                    <span className="ml-auto shrink-0 text-xs tabular-nums text-ink-muted">
+                      {dentro.length}
                     </span>
                   )}
                 </header>
 
+                {/* El orden es configuración del tablero, no preferencia de
+                    cada navegador: se guarda en la columna y lo ve el equipo
+                    entero. Cada etapa se lee con una pregunta distinta —qué
+                    tomar ahora, qué lleva más tiempo atascado—, y por eso el
+                    criterio es de la columna y no del tablero. */}
+                <label className="mb-2 flex items-center gap-1.5 px-0.5 text-[11px] text-ink-muted">
+                  <span className="sr-only">Ordenar {col.name} por</span>
+                  <select
+                    value={col.sort}
+                    disabled={cambiarColumna.isPending}
+                    onChange={(e) =>
+                      cambiarColumna.mutate({
+                        id: col.id,
+                        patch: { sort: e.target.value as ColumnSort },
+                      })
+                    }
+                    aria-label={`Ordenar ${col.name} por`}
+                    className="w-full rounded border border-border bg-surface px-1.5 py-1 text-[11px] outline-none focus:border-brand"
+                  >
+                    {COLUMN_SORTS.map((criterio) => (
+                      <option key={criterio} value={criterio}>
+                        {COLUMN_SORT_LABEL[criterio]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
                 {/* Altura mínima para que una columna vacía no colapse y
                     descuadre el tablero. */}
                 <div className="flex min-h-[7rem] flex-1 flex-col gap-2">
-                  {columna.map((task) => (
+                  {dentro.map((task) => (
                     <TaskCard
                       key={task.id}
                       task={task}
                       pending={moviendoId === task.id}
                       autoFocus={recienMovida === task.id}
-                      onMove={(status) => moverTarea(task, status, 'flecha')}
+                      anterior={anterior}
+                      siguiente={siguiente}
+                      onMove={(columnId) => moverTarea(task, columnId, 'flecha')}
                       onEdit={() => setEditando(task)}
                       onDelete={() => borrarTarea(task)}
                     />
                   ))}
 
-                  {columna.length === 0 && (
+                  {dentro.length === 0 && (
                     <p className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-ink-muted">
                       {hayFiltro ? 'Sin tareas que coincidan' : 'Sin tareas'}
                     </p>
@@ -308,8 +374,8 @@ export function TaskBoard({
                   variant="ghost"
                   size="sm"
                   className="mt-2 w-full justify-start"
-                  aria-label={`Añadir tarea a ${STATUS_LABEL[estado]}`}
-                  onClick={() => setCreandoEn(estado)}
+                  aria-label={`Añadir tarea a ${col.name}`}
+                  onClick={() => setCreandoEn(col)}
                 >
                   <Plus className="size-3.5" aria-hidden />
                   Añadir
@@ -335,18 +401,37 @@ export function TaskBoard({
         </DndContext>
       )}
 
-      <TaskFormDialog
-        open={creandoEn !== null}
-        onClose={() => setCreandoEn(null)}
-        projectId={projectId}
-        {...(creandoEn ? { defaultStatus: creandoEn } : {})}
-      />
+      {/* Montado solo cuando se abre, no siempre.
+          Renderizarlo con `open={creandoEn !== null}` dejaba los dos diálogos
+          —crear y editar— en el documento a la vez, con los mismos `id` en sus
+          campos: `<label htmlFor="task-column">` apuntaba entonces al del
+          primero y el segundo se quedaba sin etiqueta asociada. Es el mismo
+          defecto que ya se corrigió en `ProjectCard`, colado de nuevo aquí; lo
+          cazó un E2E al encontrar dos `#task-column`. */}
+      {creandoEn && (
+        <TaskFormDialog
+          open
+          onClose={() => setCreandoEn(null)}
+          projectId={projectId}
+          columnas={columnas}
+          defaultColumnId={creandoEn.id}
+        />
+      )}
       {editando && (
         <TaskFormDialog
           open
           onClose={() => setEditando(null)}
           projectId={projectId}
+          columnas={columnas}
           task={editando}
+        />
+      )}
+      {gestionando && (
+        <ColumnManagerDialog
+          open
+          onClose={() => setGestionando(false)}
+          projectId={projectId}
+          columnas={columnas}
         />
       )}
     </section>
@@ -362,20 +447,22 @@ export function TaskBoard({
  * destino sin tener que traducir nada.
  */
 function ColumnaDestino({
-  estado,
+  columna,
   arrastrando,
   children,
 }: {
-  estado: TaskStatus;
+  columna: ProjectColumnSummary;
   arrastrando: boolean;
   children: ReactNode;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: estado });
+  // El `id` de la zona ES el de la columna: así `onDragEnd` recibe el destino
+  // sin traducir nada. Antes era el estado, cuando ambos coincidían.
+  const { setNodeRef, isOver } = useDroppable({ id: columna.id });
 
   return (
     <section
       ref={setNodeRef}
-      aria-label={STATUS_LABEL[estado]}
+      aria-label={columna.name}
       /**
        * La columna es la unidad de destino, y tiene que verse así.
        *
@@ -393,7 +480,7 @@ function ColumnaDestino({
       {/* Dice a dónde va la tarjeta, que es lo único que el gesto decide. */}
       {isOver && (
         <p className="pointer-events-none absolute inset-x-3 top-3 z-10 rounded-lg bg-brand px-2.5 py-1 text-center text-xs font-medium text-white shadow">
-          Soltar para mover a {STATUS_LABEL[estado]}
+          Soltar para mover a {columna.name}
         </p>
       )}
       {children}

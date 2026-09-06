@@ -13,6 +13,10 @@ export const ERROR_CODES = {
   PROJECT_NAME_TAKEN: 'PROJECT_NAME_TAKEN',
   PROJECT_HAS_TASKS: 'PROJECT_HAS_TASKS',
   WIP_LIMIT_REACHED: 'WIP_LIMIT_REACHED',
+  COLUMN_NOT_FOUND: 'COLUMN_NOT_FOUND',
+  COLUMN_HAS_TASKS: 'COLUMN_HAS_TASKS',
+  COLUMN_NAME_TAKEN: 'COLUMN_NAME_TAKEN',
+  LAST_COLUMN_OF_CATEGORY: 'LAST_COLUMN_OF_CATEGORY',
   ROUTE_NOT_FOUND: 'ROUTE_NOT_FOUND',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
 } as const;
@@ -93,6 +97,49 @@ export class WipLimitReachedError extends AppError {
   constructor(limite: number, cause?: unknown) {
     super(409, ERROR_CODES.WIP_LIMIT_REACHED,
       `El límite de trabajo en curso es de ${limite} ${limite === 1 ? 'tarea' : 'tareas'}. Termina o devuelve alguna antes de empezar otra.`,
+      cause !== undefined ? { cause } : undefined);
+  }
+}
+
+export class ColumnNotFoundError extends AppError {
+  constructor(id: string, cause?: unknown) {
+    super(404, ERROR_CODES.COLUMN_NOT_FOUND, `No existe una columna con id ${id} en este proyecto.`,
+      cause !== undefined ? { cause } : undefined);
+  }
+}
+
+/**
+ * Borrar una columna con tareas dentro.
+ *
+ * Mismo criterio que `ProjectHasTasksError`: no hay borrado en cascada de
+ * trabajo ajeno. El mensaje dice cuántas tareas hay y cuál es la salida, que
+ * aquí sí existe —reasignarlas— porque la API la ofrece en la misma operación.
+ */
+export class ColumnHasTasksError extends AppError {
+  constructor(tareas: number, cause?: unknown) {
+    super(409, ERROR_CODES.COLUMN_HAS_TASKS,
+      `Esta columna todavía tiene ${tareas} ${tareas === 1 ? 'tarea' : 'tareas'}. Indica a qué columna moverlas para poder eliminarla.`,
+      cause !== undefined ? { cause } : undefined);
+  }
+}
+
+export class ColumnNameTakenError extends AppError {
+  constructor(name: string, cause?: unknown) {
+    super(409, ERROR_CODES.COLUMN_NAME_TAKEN, `Este proyecto ya tiene una columna llamada "${name}".`,
+      cause !== undefined ? { cause } : undefined);
+  }
+}
+
+/**
+ * Un tablero necesita al menos una columna de cada categoría para seguir
+ * siendo un flujo: sin `TODO` no hay entrada, sin `IN_PROGRESS` no hay trabajo
+ * en curso que limitar, y sin `DONE` no hay forma de terminar nada —ni de que
+ * el trigger selle `completed_at`—.
+ */
+export class LastColumnOfCategoryError extends AppError {
+  constructor(categoria: string, cause?: unknown) {
+    super(409, ERROR_CODES.LAST_COLUMN_OF_CATEGORY,
+      `Es la última columna de tipo "${categoria}" del proyecto. Crea otra equivalente antes de eliminarla.`,
       cause !== undefined ? { cause } : undefined);
   }
 }

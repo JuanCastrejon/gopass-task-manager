@@ -80,10 +80,15 @@ await runner({
 const { pool, closePool } = await import('../../src/db/pool.js');
 
 beforeEach(async () => {
-  // Nombrar las dos tablas hace innecesario `CASCADE`: solo haría falta si
-  // una tabla que referencia a `projects` quedara fuera de la lista.
+  // Nombrar las tres tablas hace innecesario `CASCADE`: solo haría falta si
+  // una tabla que referencia a `projects` quedara fuera de la lista. Ese
+  // comentario resultó profético al añadir `project_columns`: PostgreSQL
+  // rechazó el TRUNCATE con «cannot truncate a table referenced in a foreign
+  // key constraint» hasta incluirla. Se prefiere seguir nombrándolas a poner
+  // `CASCADE`, que borraría en silencio cualquier tabla futura que nadie haya
+  // pensado en revisar.
   // `RESTART IDENTITY` tampoco: las claves primarias son uuid, no secuencias.
-  await pool.query('TRUNCATE TABLE tasks, projects');
+  await pool.query('TRUNCATE TABLE tasks, project_columns, projects');
 });
 
 afterAll(async () => {

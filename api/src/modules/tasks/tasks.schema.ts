@@ -42,6 +42,12 @@ export const createTaskSchema = z
     title: z.string().trim().min(1, 'El título no puede estar vacío.').max(200, 'El título supera los 200 caracteres.'),
     description: z.string().trim().max(5000).nullish(),
     status: z.enum(TASK_STATUSES).optional(),
+    /**
+     * Columna concreta del tablero. Gana sobre `status` cuando llegan las dos,
+     * porque un proyecto puede tener varias columnas de la misma categoría y
+     * solo el identificador dice cuál.
+     */
+    columnId: z.string().uuid('El identificador de columna debe ser un UUID.').optional(),
     priority: z.enum(TASK_PRIORITIES).optional(),
   })
   .strict(strictMessage);
@@ -51,6 +57,8 @@ export const patchTaskSchema = z
     title: z.string().trim().min(1, 'El título no puede estar vacío.').max(200, 'El título supera los 200 caracteres.').optional(),
     description: z.string().trim().max(5000).nullable().optional(),
     status: z.enum(TASK_STATUSES).optional(),
+    /** Ver la nota de `createTaskSchema`: gana sobre `status`. */
+    columnId: z.string().uuid('El identificador de columna debe ser un UUID.').optional(),
     priority: z.enum(TASK_PRIORITIES).optional(),
     /**
      * Reasignar la tarea a otro proyecto.

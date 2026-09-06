@@ -13,6 +13,7 @@ export const openApiSpec = {
   tags: [
     { name: 'Health', description: 'Sondas de salud del sistema' },
     { name: 'Projects', description: 'Operaciones CRUD de proyectos y avance' },
+    { name: 'Columns', description: 'Columnas del tablero, limites de trabajo en curso y orden' },
     { name: 'Tasks', description: 'Operaciones CRUD de tareas, estados y filtros' },
     { name: 'Stats', description: 'Métricas analíticas del panel' },
   ],
@@ -240,6 +241,166 @@ export const openApiSpec = {
               'application/problem+json': {
                 schema: { $ref: '#/components/schemas/ProblemDetails' },
               },
+            },
+          },
+        },
+      },
+    },
+    '/projects/{projectId}/columns': {
+      get: {
+        tags: ['Columns'],
+        summary: 'Listar las columnas del tablero con su recuento de tareas',
+        parameters: [
+          { name: 'projectId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          200: {
+            description: 'Columnas ordenadas por posicion',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { $ref: '#/components/schemas/ProjectColumnSummary' } },
+              },
+            },
+          },
+          404: {
+            description: 'Proyecto no encontrado',
+            content: {
+              'application/problem+json': { schema: { $ref: '#/components/schemas/ProblemDetails' } },
+            },
+          },
+        },
+      },
+      post: {
+        tags: ['Columns'],
+        summary: 'Anadir una columna al final del tablero',
+        parameters: [
+          { name: 'projectId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/CreateColumnInput' } } },
+        },
+        responses: {
+          201: {
+            description: 'Columna creada',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ProjectColumn' } } },
+          },
+          400: {
+            description: 'Payload invalido, o limite en una columna de categoria DONE',
+            content: {
+              'application/problem+json': { schema: { $ref: '#/components/schemas/ProblemDetails' } },
+            },
+          },
+          409: {
+            description: 'Ya existe una columna con ese nombre en el proyecto (COLUMN_NAME_TAKEN)',
+            content: {
+              'application/problem+json': { schema: { $ref: '#/components/schemas/ProblemDetails' } },
+            },
+          },
+        },
+      },
+    },
+    '/projects/{projectId}/columns/reorder': {
+      patch: {
+        tags: ['Columns'],
+        summary: 'Reordenar el tablero enviando el orden completo',
+        description:
+          'Se envia la lista entera y no un desplazamiento: un intercambio en dos sentencias dejaria un instante con dos columnas en la misma posicion.',
+        parameters: [
+          { name: 'projectId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['columnIds'],
+                properties: {
+                  columnIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Columnas ya reordenadas',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { $ref: '#/components/schemas/ProjectColumnSummary' } },
+              },
+            },
+          },
+          404: {
+            description: 'Orden incompleto o con columnas ajenas al proyecto',
+            content: {
+              'application/problem+json': { schema: { $ref: '#/components/schemas/ProblemDetails' } },
+            },
+          },
+        },
+      },
+    },
+    '/projects/{projectId}/columns/{columnId}': {
+      patch: {
+        tags: ['Columns'],
+        summary: 'Renombrar, limitar u ordenar una columna',
+        parameters: [
+          { name: 'projectId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          { name: 'columnId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/PatchColumnInput' } } },
+        },
+        responses: {
+          200: {
+            description: 'Columna actualizada',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ProjectColumn' } } },
+          },
+          400: {
+            description: 'Payload invalido, o intento de cambiar la categoria',
+            content: {
+              'application/problem+json': { schema: { $ref: '#/components/schemas/ProblemDetails' } },
+            },
+          },
+          404: {
+            description: 'La columna no existe o pertenece a otro proyecto (COLUMN_NOT_FOUND)',
+            content: {
+              'application/problem+json': { schema: { $ref: '#/components/schemas/ProblemDetails' } },
+            },
+          },
+        },
+      },
+      delete: {
+        tags: ['Columns'],
+        summary: 'Eliminar una columna, opcionalmente reasignando sus tareas',
+        description:
+          'Sin reassignTo, una columna con tareas devuelve 409 con el recuento: no hay cascada sobre trabajo ajeno. Con reassignTo, mover y borrar ocurren en la misma transaccion y se respeta el limite del destino.',
+        parameters: [
+          { name: 'projectId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          { name: 'columnId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          {
+            name: 'reassignTo',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', format: 'uuid' },
+            description: 'Columna del mismo proyecto a la que se mueven las tareas antes de borrar.',
+          },
+        ],
+        responses: {
+          204: { description: 'Columna eliminada' },
+          404: {
+            description: 'La columna no existe o pertenece a otro proyecto',
+            content: {
+              'application/problem+json': { schema: { $ref: '#/components/schemas/ProblemDetails' } },
+            },
+          },
+          409: {
+            description:
+              'Tiene tareas y no se indico destino (COLUMN_HAS_TASKS), es la ultima de su categoria (LAST_COLUMN_OF_CATEGORY), o el destino no tiene cupo (WIP_LIMIT_REACHED)',
+            content: {
+              'application/problem+json': { schema: { $ref: '#/components/schemas/ProblemDetails' } },
             },
           },
         },
@@ -513,15 +674,6 @@ export const openApiSpec = {
           id: { type: 'string', format: 'uuid' },
           name: { type: 'string', example: 'Telepeaje — integración de operadores' },
           description: { type: 'string', nullable: true, example: 'Conexión con concesionarios viales' },
-          wipLimit: {
-            type: 'integer',
-            nullable: true,
-            minimum: 1,
-            maximum: 100,
-            description:
-              'Maximo de tareas simultaneas en IN_PROGRESS. null = sin limite. Superarlo devuelve 409 WIP_LIMIT_REACHED.',
-            example: 3,
-          },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
@@ -531,15 +683,10 @@ export const openApiSpec = {
           { $ref: '#/components/schemas/Project' },
           {
             type: 'object',
-            required: ['taskCount', 'doneCount', 'inProgressCount', 'byPriority', 'progress'],
+            required: ['taskCount', 'doneCount', 'byPriority', 'progress'],
             properties: {
               taskCount: { type: 'integer', example: 4 },
               doneCount: { type: 'integer', example: 1 },
-              inProgressCount: {
-                type: 'integer',
-                description: 'Tareas ahora mismo en IN_PROGRESS. Es el numerador de wipLimit.',
-                example: 1,
-              },
               byPriority: {
                 type: 'object',
                 description:
@@ -556,13 +703,79 @@ export const openApiSpec = {
           },
         ],
       },
+      ProjectColumn: {
+        type: 'object',
+        required: ['id', 'projectId', 'name', 'category', 'position', 'wipLimit', 'sort'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          projectId: { type: 'string', format: 'uuid' },
+          name: { type: 'string', maxLength: 60, example: 'En revision' },
+          category: {
+            type: 'string',
+            enum: ['TODO', 'IN_PROGRESS', 'DONE'],
+            description:
+              'Categoria de ciclo de vida. Varias columnas pueden compartirla. De ella dependen el sellado de completedAt y la agregacion global de /stats.',
+          },
+          position: { type: 'integer', minimum: 1, example: 2 },
+          wipLimit: {
+            type: 'integer',
+            nullable: true,
+            minimum: 1,
+            maximum: 100,
+            description:
+              'Maximo de tareas simultaneas en esta columna. null = sin limite. Nunca en una columna de categoria DONE.',
+            example: 3,
+          },
+          sort: {
+            type: 'string',
+            enum: ['priority_desc', 'priority_asc', 'created_desc', 'created_asc'],
+            description: 'Criterio de orden de las tareas dentro de la columna. Compartido por el equipo.',
+          },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      ProjectColumnSummary: {
+        allOf: [
+          { $ref: '#/components/schemas/ProjectColumn' },
+          {
+            type: 'object',
+            required: ['taskCount'],
+            properties: { taskCount: { type: 'integer', example: 4 } },
+          },
+        ],
+      },
+      CreateColumnInput: {
+        type: 'object',
+        required: ['name', 'category'],
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 60, example: 'En revision' },
+          category: { type: 'string', enum: ['TODO', 'IN_PROGRESS', 'DONE'] },
+          wipLimit: { type: 'integer', nullable: true, minimum: 1, maximum: 100 },
+          sort: {
+            type: 'string',
+            enum: ['priority_desc', 'priority_asc', 'created_desc', 'created_asc'],
+          },
+        },
+      },
+      PatchColumnInput: {
+        type: 'object',
+        description: 'La categoria no es modificable: cambiarla moveria el estado de todas sus tareas.',
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 60 },
+          wipLimit: { type: 'integer', nullable: true, minimum: 1, maximum: 100 },
+          sort: {
+            type: 'string',
+            enum: ['priority_desc', 'priority_asc', 'created_desc', 'created_asc'],
+          },
+        },
+      },
       CreateProjectInput: {
         type: 'object',
         required: ['name'],
         properties: {
           name: { type: 'string', minLength: 1, maxLength: 120, example: 'App de parqueaderos' },
           description: { type: 'string', maxLength: 2000, nullable: true, example: 'Flujo de pago' },
-          wipLimit: { type: 'integer', nullable: true, minimum: 1, maximum: 100, example: 3 },
         },
       },
       PatchProjectInput: {
@@ -570,8 +783,6 @@ export const openApiSpec = {
         properties: {
           name: { type: 'string', minLength: 1, maxLength: 120, example: 'Nuevo nombre' },
           description: { type: 'string', maxLength: 2000, nullable: true, example: null },
-          // `null` explicito retira el limite; ausente lo deja como estaba.
-          wipLimit: { type: 'integer', nullable: true, minimum: 1, maximum: 100, example: 3 },
         },
       },
       Task: {
@@ -580,6 +791,11 @@ export const openApiSpec = {
         properties: {
           id: { type: 'string', format: 'uuid' },
           projectId: { type: 'string', format: 'uuid' },
+          columnId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Columna del tablero en la que vive. Su categoria es siempre `status`.',
+          },
           title: { type: 'string', example: 'Definir contrato de conciliación' },
           description: { type: 'string', nullable: true, example: 'Especificación del protocolo' },
           status: { type: 'string', enum: ['TODO', 'IN_PROGRESS', 'DONE'], example: 'IN_PROGRESS' },

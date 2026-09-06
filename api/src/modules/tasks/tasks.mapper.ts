@@ -3,6 +3,7 @@ import type { TaskPriority, TaskStatus } from './tasks.schema.js';
 export interface TaskRow {
   id: string;
   project_id: string;
+  column_id: string;
   title: string;
   description: string | null;
   status: TaskStatus;
@@ -15,6 +16,8 @@ export interface TaskRow {
 export interface Task {
   id: string;
   projectId: string;
+  /** Columna del tablero en la que vive. Su categoría es siempre `status`. */
+  columnId: string;
   title: string;
   description: string | null;
   status: TaskRow['status'];
@@ -28,6 +31,7 @@ export function toTask(row: TaskRow): Task {
   return {
     id: row.id,
     projectId: row.project_id,
+    columnId: row.column_id,
     title: row.title,
     description: row.description,
     status: row.status,

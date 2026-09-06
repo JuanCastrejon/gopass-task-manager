@@ -8,6 +8,7 @@ import { messageFor } from '../../lib/error-messages.ts';
 import { ProjectFormDialog } from './ProjectFormDialog.tsx';
 import { DeleteProjectDialog } from './DeleteProjectDialog.tsx';
 import { useProject } from './api.ts';
+import { useColumns } from '../columns/api.ts';
 import { TaskBoard } from '../tasks/TaskBoard.tsx';
 
 /** Detalle del proyecto: cabecera con el avance y, debajo, el tablero de tareas. */
@@ -15,6 +16,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [editando, setEditando] = useState(false);
   const [borrando, setBorrando] = useState(false);
   const proyecto = useProject(projectId);
+  const columnas = useColumns(projectId);
 
   return (
     <div className="space-y-6">
@@ -88,7 +90,16 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             </div>
           </header>
 
-          <TaskBoard projectId={projectId} wipLimit={proyecto.data.wipLimit} />
+          {/* El tablero no se pinta hasta conocer sus columnas: sin ellas no
+              sabría cuántas dibujar, y un tablero de tres por defecto
+              parpadearía al llegar las de verdad. */}
+          {columnas.data && <TaskBoard projectId={projectId} columnas={columnas.data} />}
+          {columnas.isError && (
+            <ErrorState
+              message={messageFor(columnas.error)}
+              onRetry={() => void columnas.refetch()}
+            />
+          )}
 
           {editando && (
             <ProjectFormDialog open onClose={() => setEditando(false)} project={proyecto.data} />

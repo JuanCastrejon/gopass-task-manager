@@ -327,8 +327,22 @@ describe('GET y DELETE /api/tasks/:id', () => {
  * saltárselo. Eso solo se ve con una base de datos de verdad.
  */
 describe('límite de trabajo en curso', () => {
-  const ponerLimite = (limite: number | null) =>
-    request(app).patch(`/api/projects/${projectId}`).send({ wipLimit: limite });
+  /**
+   * El límite vive en la columna, no en el proyecto: «Desarrollo» máximo 3 y
+   * «QA» máximo 2 es una política real que un único límite por proyecto no
+   * podría expresar.
+   */
+  const columnaEnCurso = async (): Promise<string> => {
+    const { body } = await request(app).get(`/api/projects/${projectId}/columns`);
+    return (body as Array<{ id: string; category: string }>).find(
+      (c) => c.category === 'IN_PROGRESS',
+    )!.id;
+  };
+
+  const ponerLimite = async (limite: number | null) =>
+    request(app)
+      .patch(`/api/projects/${projectId}/columns/${await columnaEnCurso()}`)
+      .send({ wipLimit: limite });
 
   const mover = (id: string, status: string) =>
     request(app).patch(`/api/tasks/${id}`).send({ status });
@@ -434,12 +448,15 @@ describe('límite de trabajo en curso', () => {
     expect(enCurso).toHaveLength(1);
   });
 
-  it('el resumen del proyecto expone el límite y cuántas van en curso', async () => {
+  it('el listado de columnas expone el límite y cuántas tareas contiene', async () => {
     await ponerLimite(3);
     const { body: t } = await crearTarea({ status: 'IN_PROGRESS' });
     expect(t.status).toBe('IN_PROGRESS');
 
-    const { body: proyecto } = await request(app).get(`/api/projects/${projectId}`);
-    expect(proyecto).toMatchObject({ wipLimit: 3, inProgressCount: 1 });
+    const { body: columnas } = await request(app).get(`/api/projects/${projectId}/columns`);
+    const enCurso = (columnas as Array<Record<string, unknown>>).find(
+      (c) => c['category'] === 'IN_PROGRESS',
+    );
+    expect(enCurso).toMatchObject({ wipLimit: 3, taskCount: 1 });
   });
 });
