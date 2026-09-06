@@ -39,6 +39,7 @@ export function createApp(): Express {
 
   // Swagger UI en /api/docs y especificación OpenAPI en /api/docs.json
   setupSwagger(app);
+  app.get('/docs', (_req, res) => res.redirect(301, '/api/docs/'));
 
   // El anidado va primero: Express evalúa en orden de registro y
   // `/api/projects/:projectId/tasks` es más específico que `/api/projects`.
