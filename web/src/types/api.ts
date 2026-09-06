@@ -13,18 +13,64 @@ export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH';
 export const TASK_STATUSES: readonly TaskStatus[] = ['TODO', 'IN_PROGRESS', 'DONE'];
 export const TASK_PRIORITIES: readonly TaskPriority[] = ['LOW', 'MEDIUM', 'HIGH'];
 
+/**
+ * Criterios de orden de una columna. El orden es configuración del tablero y
+ * no preferencia de cada navegador: se guarda en la columna, así que todo el
+ * equipo ve lo mismo y sobrevive a cambiar de equipo.
+ */
+export const COLUMN_SORTS = ['priority_desc', 'priority_asc', 'created_desc', 'created_asc'] as const;
+export type ColumnSort = (typeof COLUMN_SORTS)[number];
+
+export const COLUMN_SORT_LABEL: Record<ColumnSort, string> = {
+  priority_desc: 'Prioridad alta primero',
+  priority_asc: 'Prioridad baja primero',
+  created_desc: 'Más recientes primero',
+  created_asc: 'Más antiguas primero',
+};
+
+/**
+ * Una columna del tablero.
+ *
+ * `category` es la categoría de ciclo de vida, y varias columnas pueden
+ * compartirla: «En revisión» y «QA» son ambas `IN_PROGRESS`. Es lo que permite
+ * que el panel agregado siga informando entre proyectos con tableros
+ * distintos, y de lo que dependen las garantías que el motor impone sobre
+ * `completedAt`. Es el mismo modelo de categorías de estado de Jira.
+ */
+export interface ProjectColumn {
+  id: string;
+  projectId: string;
+  name: string;
+  category: TaskStatus;
+  position: number;
+  /** Máximo de tareas simultáneas. `null` es «sin límite». Nunca en una terminal. */
+  wipLimit: number | null;
+  sort: ColumnSort;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectColumnSummary extends ProjectColumn {
+  taskCount: number;
+}
+
+export interface CreateColumnInput {
+  name: string;
+  category: TaskStatus;
+  wipLimit?: number | null;
+  sort?: ColumnSort;
+}
+
+export interface PatchColumnInput {
+  name?: string;
+  wipLimit?: number | null;
+  sort?: ColumnSort;
+}
+
 export interface Project {
   id: string;
   name: string;
   description: string | null;
-  /**
-   * Máximo de tareas simultáneas en «En curso». `null` es «sin límite».
-   *
-   * Es la única regla del método kanban que el tablero impone: sin límite, un
-   * tablero solo dibuja columnas. Se aplica a `IN_PROGRESS` y a ninguna otra,
-   * porque en tres columnas «trabajo en curso» es literalmente esa.
-   */
-  wipLimit: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -32,8 +78,6 @@ export interface Project {
 export interface ProjectSummary extends Project {
   taskCount: number;
   doneCount: number;
-  /** Cuántas hay ahora mismo en curso. Es el numerador que muestra la columna. */
-  inProgressCount: number;
   /**
    * Cuántas tareas de cada prioridad tiene el proyecto. Las tres claves llegan
    * siempre, también en 0, así que el filtro del panel puede preguntar
@@ -46,6 +90,8 @@ export interface ProjectSummary extends Project {
 export interface Task {
   id: string;
   projectId: string;
+  /** Columna del tablero en la que vive. Su categoría es siempre `status`. */
+  columnId: string;
   title: string;
   description: string | null;
   status: TaskStatus;
@@ -59,13 +105,11 @@ export interface Task {
 export interface CreateProjectInput {
   name: string;
   description?: string | null;
-  wipLimit?: number | null;
 }
 
 export interface PatchProjectInput {
   name?: string;
   description?: string | null;
-  wipLimit?: number | null;
 }
 
 export interface Stats {

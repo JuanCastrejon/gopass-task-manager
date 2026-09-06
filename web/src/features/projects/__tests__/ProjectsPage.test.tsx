@@ -23,12 +23,10 @@ const proyecto = (
   id: crypto.randomUUID(),
   name,
   description: null,
-  wipLimit: null,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
   taskCount: byPriority.LOW + byPriority.MEDIUM + byPriority.HIGH,
   doneCount: 0,
-  inProgressCount: 0,
   byPriority,
   progress: 0,
 });

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api-client.ts';
+import { columnKeys } from '../columns/api.ts';
 import { projectKeys, statsKey } from '../projects/api.ts';
 import type { Task, TaskPriority, TaskStatus } from '../../types/api.ts';
 
@@ -37,13 +38,19 @@ export function useTasks(projectId: string, filters: TaskFilters = {}) {
 }
 
 /**
- * Cualquier cambio en una tarea mueve el avance del proyecto y los agregados
- * del panel, así que se invalidan las tres familias de claves.
+ * Cualquier cambio en una tarea mueve el avance del proyecto, los agregados del
+ * panel y **el recuento de las columnas**, así que se invalidan las cuatro
+ * familias de claves.
+ *
+ * Lo de las columnas se olvidó al principio y lo cazó un E2E: el diálogo de
+ * gestión seguía diciendo «0 tareas» en una columna recién llenada, y ofrecía
+ * borrarla sin preguntar a dónde iban.
  */
 function useInvalidateAfterTaskChange() {
   const client = useQueryClient();
   return () => {
     void client.invalidateQueries({ queryKey: taskKeys.all });
+    void client.invalidateQueries({ queryKey: columnKeys.all });
     void client.invalidateQueries({ queryKey: projectKeys.all });
     void client.invalidateQueries({ queryKey: statsKey });
   };
@@ -53,6 +60,8 @@ export interface CreateTaskInput {
   title: string;
   description?: string | null;
   status?: TaskStatus;
+  /** Gana sobre `status`: solo el identificador distingue entre columnas de la misma categoría. */
+  columnId?: string;
   priority?: TaskPriority;
 }
 
@@ -60,6 +69,8 @@ export interface PatchTaskInput {
   title?: string;
   description?: string | null;
   status?: TaskStatus;
+  /** Gana sobre `status`. Ver la nota de `CreateTaskInput`. */
+  columnId?: string;
   priority?: TaskPriority;
 }
 

@@ -2,17 +2,8 @@ import { useEffect, useRef, type SyntheticEvent } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { ArrowLeft, ArrowRight, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/Button.tsx';
-import { PriorityBadge, STATUS_LABEL } from '../../components/ui/Badge.tsx';
-import type { Task, TaskStatus } from '../../types/api.ts';
-
-const SIGUIENTE: Partial<Record<TaskStatus, TaskStatus>> = {
-  TODO: 'IN_PROGRESS',
-  IN_PROGRESS: 'DONE',
-};
-const ANTERIOR: Partial<Record<TaskStatus, TaskStatus>> = {
-  IN_PROGRESS: 'TODO',
-  DONE: 'IN_PROGRESS',
-};
+import { PriorityBadge } from '../../components/ui/Badge.tsx';
+import type { ProjectColumnSummary, Task } from '../../types/api.ts';
 
 /**
  * Los controles viven DENTRO de la superficie arrastrable, así que hay que
@@ -32,22 +23,42 @@ interface Props {
   pending: boolean;
   /** Devuelve el foco tras un movimiento: la tarjeta se remonta en otra columna. */
   autoFocus: boolean;
-  onMove: (status: TaskStatus) => void;
+  /**
+   * Columnas contiguas, calculadas por posición en el tablero.
+   *
+   * Antes eran un mapa fijo de tres estados. Con columnas configurables la
+   * transición contigua deja de ser una constante del dominio y pasa a
+   * depender del tablero concreto, así que la calcula quien lo conoce.
+   */
+  anterior: ProjectColumnSummary | null;
+  siguiente: ProjectColumnSummary | null;
+  onMove: (columnId: string) => void;
   onEdit: () => void;
   onDelete: () => void;
 }
 
 /**
- * El cambio de estado se hace con flechas y no con un `<select>`.
+ * El cambio de columna se hace con flechas y no con un `<select>` por tarjeta.
  *
- * La columna ya dice cuál es el estado actual, así que un desplegable que lo
- * repita es información redundante ocupando el ancho de una tarjeta estrecha.
- * Lo que no es redundante es la **transición**, y eso es justo lo que
- * comunican las flechas, en un solo clic y sin abrir nada encima.
+ * La columna ya dice dónde está la tarea, así que un desplegable que lo repita
+ * es información redundante ocupando el ancho de una tarjeta estrecha. Lo que
+ * no es redundante es la **transición**, y eso es lo que comunican las flechas,
+ * en un solo clic y sin abrir nada encima.
+ *
+ * Con N columnas siguen bastando para **WCAG 2.2 SC 2.5.7**: se llega a
+ * cualquier columna paso a paso sin arrastrar. Para el salto directo está el
+ * desplegable del diálogo de edición, que no roba sitio en la tarjeta.
  */
-export function TaskCard({ task, pending, autoFocus, onMove, onEdit, onDelete }: Props) {
-  const anterior = ANTERIOR[task.status];
-  const siguiente = SIGUIENTE[task.status];
+export function TaskCard({
+  task,
+  pending,
+  autoFocus,
+  anterior,
+  siguiente,
+  onMove,
+  onEdit,
+  onDelete,
+}: Props) {
   // El tipo unido, y no `useRef<HTMLElement>(null)`: con este último `current`
   // es de solo lectura y aquí hay que escribirlo desde el callback del ref.
   const focusRef = useRef<HTMLElement | null>(null);
@@ -112,8 +123,8 @@ export function TaskCard({ task, pending, autoFocus, onMove, onEdit, onDelete }:
             variant="ghost"
             size="sm"
             className="size-7 px-0 pointer-coarse:size-11"
-            onClick={() => onMove(anterior)}
-            aria-label={`Mover "${task.title}" a ${STATUS_LABEL[anterior]}`}
+            onClick={() => onMove(anterior.id)}
+            aria-label={`Mover "${task.title}" a ${anterior.name}`}
           >
             <ArrowLeft className="size-3.5" aria-hidden />
           </Button>
@@ -128,8 +139,8 @@ export function TaskCard({ task, pending, autoFocus, onMove, onEdit, onDelete }:
             variant="ghost"
             size="sm"
             className="size-7 px-0 pointer-coarse:size-11"
-            onClick={() => onMove(siguiente)}
-            aria-label={`Mover "${task.title}" a ${STATUS_LABEL[siguiente]}`}
+            onClick={() => onMove(siguiente.id)}
+            aria-label={`Mover "${task.title}" a ${siguiente.name}`}
           >
             <ArrowRight className="size-3.5" aria-hidden />
           </Button>

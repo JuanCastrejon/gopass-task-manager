@@ -22,12 +22,19 @@ test('el límite de trabajo en curso se anuncia, se impone y se puede liberar', 
   await page.getByRole('button', { name: 'Nuevo proyecto' }).click();
   const dialogo = page.getByRole('dialog');
   await dialogo.getByLabel('Nombre').fill(proyecto);
-  await dialogo.getByLabel(/Límite de trabajo en curso/).fill('1');
   await dialogo.getByRole('button', { name: 'Crear proyecto' }).click();
 
   const tarjeta = page.locator('article').filter({ hasText: proyecto });
   await tarjeta.getByRole('link', { name: /^Abrir tareas de/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: proyecto })).toBeVisible();
+
+  // El límite es de la columna, no del proyecto: «Desarrollo» máximo 3 y «QA»
+  // máximo 2 es una política que un único límite por proyecto no expresaría.
+  await page.getByRole('button', { name: 'Columnas' }).click();
+  const gestorColumnas = page.getByRole('dialog');
+  await gestorColumnas.getByLabel('Límite de trabajo en curso de En curso').fill('1');
+  await gestorColumnas.getByLabel('Nueva columna').click(); // dispara el blur que guarda
+  await gestorColumnas.getByLabel('Cerrar').click();
 
   const enCurso = page.getByRole('region', { name: 'En curso' });
   const porHacer = page.getByRole('region', { name: 'Por hacer' });
@@ -42,12 +49,12 @@ test('el límite de trabajo en curso se anuncia, se impone y se puede liberar', 
   }
 
   // El contador anuncia la capacidad ANTES de chocar con ella.
-  await expect(enCurso.getByTitle('0 de un máximo de 1 en curso')).toBeVisible();
+  await expect(enCurso.getByTitle('0 de un máximo de 1 en En curso')).toBeVisible();
 
   // --- la primera entra ---
   await page.getByRole('button', { name: `Mover "Primera ${sufijo}" a En curso` }).click();
   await expect(enCurso.getByText(`Primera ${sufijo}`)).toBeVisible();
-  await expect(enCurso.getByTitle('1 de un máximo de 1 en curso')).toBeVisible();
+  await expect(enCurso.getByTitle('1 de un máximo de 1 en En curso')).toBeVisible();
 
   // --- la segunda choca, y el mensaje dice qué hacer ---
   await page.getByRole('button', { name: `Mover "Segunda ${sufijo}" a En curso` }).click();
@@ -67,6 +74,6 @@ test('el límite de trabajo en curso se anuncia, se impone y se puede liberar', 
   await page.reload();
   await expect(page.getByRole('region', { name: 'En curso' })).toContainText(`Segunda ${sufijo}`);
   await expect(
-    page.getByRole('region', { name: 'En curso' }).getByTitle('1 de un máximo de 1 en curso'),
+    page.getByRole('region', { name: 'En curso' }).getByTitle('1 de un máximo de 1 en En curso'),
   ).toBeVisible();
 });

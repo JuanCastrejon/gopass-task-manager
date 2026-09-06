@@ -1,9 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Modal } from '../../components/ui/Modal.tsx';
 import { Button } from '../../components/ui/Button.tsx';
-import { PRIORITY_LABEL, STATUS_LABEL } from '../../components/ui/Badge.tsx';
+import { PRIORITY_LABEL } from '../../components/ui/Badge.tsx';
 import { fieldErrors, messageFor } from '../../lib/error-messages.ts';
-import { TASK_PRIORITIES, TASK_STATUSES, type Task, type TaskPriority, type TaskStatus } from '../../types/api.ts';
+import {
+  TASK_PRIORITIES,
+  type ProjectColumnSummary,
+  type Task,
+  type TaskPriority,
+} from '../../types/api.ts';
 import { useCreateTask, useUpdateTask } from './api.ts';
 
 interface Props {
@@ -12,15 +17,24 @@ interface Props {
   projectId: string;
   /** Ausente para crear; presente para editar. */
   task?: Task;
-  /** Columna desde la que se pulsó «añadir», para preseleccionar el estado. */
-  defaultStatus?: TaskStatus;
+  /** Las columnas del tablero, ya ordenadas por posición. */
+  columnas: ProjectColumnSummary[];
+  /** Columna desde la que se pulsó «añadir», para preseleccionarla. */
+  defaultColumnId?: string;
 }
 
-export function TaskFormDialog({ open, onClose, projectId, task, defaultStatus }: Props) {
+export function TaskFormDialog({
+  open,
+  onClose,
+  projectId,
+  task,
+  columnas,
+  defaultColumnId,
+}: Props) {
   const editing = task !== undefined;
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [status, setStatus] = useState<TaskStatus>('TODO');
+  const [columnId, setColumnId] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('MEDIUM');
 
   const create = useCreateTask(projectId);
@@ -31,11 +45,11 @@ export function TaskFormDialog({ open, onClose, projectId, task, defaultStatus }
     if (!open) return;
     setTitle(task?.title ?? '');
     setDescription(task?.description ?? '');
-    setStatus(task?.status ?? defaultStatus ?? 'TODO');
+    setColumnId(task?.columnId ?? defaultColumnId ?? columnas[0]?.id ?? '');
     setPriority(task?.priority ?? 'MEDIUM');
     mutation.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, task?.id, defaultStatus]);
+  }, [open, task?.id, defaultColumnId]);
 
   const errores = fieldErrors(mutation.error);
   const tituloVacio = title.trim().length === 0;
@@ -52,12 +66,20 @@ export function TaskFormDialog({ open, onClose, projectId, task, defaultStatus }
     const limpio = description.trim();
     if (editing) {
       update.mutate(
-        { id: task.id, patch: { title: title.trim(), description: limpio === '' ? null : limpio, status, priority } },
+        {
+          id: task.id,
+          patch: {
+            title: title.trim(),
+            description: limpio === '' ? null : limpio,
+            columnId,
+            priority,
+          },
+        },
         { onSuccess: onClose },
       );
     } else {
       create.mutate(
-        { title: title.trim(), status, priority, ...(limpio === '' ? {} : { description: limpio }) },
+        { title: title.trim(), columnId, priority, ...(limpio === '' ? {} : { description: limpio }) },
         { onSuccess: onClose },
       );
     }
@@ -98,18 +120,27 @@ export function TaskFormDialog({ open, onClose, projectId, task, defaultStatus }
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
-            <label htmlFor="task-status" className="mb-1.5 block text-sm font-medium">
-              Estado
+            {/* Antes decía «Estado» y ofrecía los tres del dominio. Ahora dice
+                «Columna» y ofrece las del tablero: el estado se deriva de la
+                columna, no al revés, y con varias columnas de la misma
+                categoría solo el nombre distingue a cuál va.
+
+                Es además la vía de salto directo entre columnas no contiguas:
+                las flechas de la tarjeta llegan a cualquiera paso a paso
+                —suficiente para WCAG 2.5.7— y este desplegable evita el paseo
+                sin robar sitio en cada tarjeta. */}
+            <label htmlFor="task-column" className="mb-1.5 block text-sm font-medium">
+              Columna
             </label>
             <select
-              id="task-status"
-              value={status}
-              onChange={(e) => setStatus(e.target.value as TaskStatus)}
+              id="task-column"
+              value={columnId}
+              onChange={(e) => setColumnId(e.target.value)}
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
             >
-              {TASK_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {STATUS_LABEL[s]}
+              {columnas.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
                 </option>
               ))}
             </select>
