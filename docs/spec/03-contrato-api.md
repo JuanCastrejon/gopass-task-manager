@@ -40,11 +40,23 @@ Todas las actualizaciones de esta aplicación son parciales: cambiar el estado d
   "description": "Conexión con los concesionarios viales",
   "taskCount": 8,
   "doneCount": 3,
+  "byPriority": { "LOW": 2, "MEDIUM": 3, "HIGH": 3 },
   "progress": 38,
   "createdAt": "2026-09-04T14:02:11.482Z",
   "updatedAt": "2026-09-04T14:02:11.482Z"
 }
 ```
+
+`byPriority` viaja en el listado y en el detalle, porque ambos salen de la misma consulta. Las tres
+claves están siempre presentes, también en 0: una clave ausente obligaría a cada consumidor a
+saberse el dominio y a defenderse con `?? 0`. El panel la usa para filtrar los proyectos que tienen
+al menos una tarea de una prioridad —un proyecto no tiene prioridad propia— y para explicar en la
+tarjeta por qué ese filtro la deja o la quita.
+
+En PostgreSQL son tres `COUNT(...) FILTER` colgados del `GROUP BY` que ya calculaba `taskCount` y
+`doneCount`; el objeto lo compone el mapper. Se descartó replicar aquí el `jsonb_object_agg` de
+`/stats`: medido sobre 204 proyectos y 20 011 tareas, las columnas no añaden un solo buffer al plan
+y el agregado de `/stats` trasladado a por-proyecto lo multiplicaba por 4,3.
 
 ### Task
 

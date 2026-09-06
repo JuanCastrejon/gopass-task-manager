@@ -504,10 +504,21 @@ export const openApiSpec = {
           { $ref: '#/components/schemas/Project' },
           {
             type: 'object',
-            required: ['taskCount', 'doneCount', 'progress'],
+            required: ['taskCount', 'doneCount', 'byPriority', 'progress'],
             properties: {
               taskCount: { type: 'integer', example: 4 },
               doneCount: { type: 'integer', example: 1 },
+              byPriority: {
+                type: 'object',
+                description:
+                  'Cuántas tareas de cada prioridad tiene el proyecto. Las tres claves llegan siempre, también en 0.',
+                required: ['LOW', 'MEDIUM', 'HIGH'],
+                properties: {
+                  LOW: { type: 'integer', example: 1 },
+                  MEDIUM: { type: 'integer', example: 1 },
+                  HIGH: { type: 'integer', example: 2 },
+                },
+              },
               progress: { type: 'integer', minimum: 0, maximum: 100, example: 25 },
             },
           },

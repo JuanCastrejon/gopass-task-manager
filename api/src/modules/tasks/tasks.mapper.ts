@@ -1,10 +1,12 @@
+import type { TaskPriority, TaskStatus } from './tasks.schema.js';
+
 export interface TaskRow {
   id: string;
   project_id: string;
   title: string;
   description: string | null;
-  status: 'TODO' | 'IN_PROGRESS' | 'DONE';
-  priority: 'LOW' | 'MEDIUM' | 'HIGH';
+  status: TaskStatus;
+  priority: TaskPriority;
   completed_at: Date | null;
   created_at: Date;
   updated_at: Date;

@@ -28,13 +28,36 @@ const STATUS_DOT: Record<TaskStatus, string> = {
  * La prioridad se distingue por color **y** por texto. Solo por color dejaría
  * fuera a quien no discrimina rojo de verde, que es en torno al 8 % de los
  * hombres.
+ *
+ * Con `count` la misma píldora sirve de desglose en la tarjeta de proyecto: el
+ * número explica por qué un chip de prioridad esconde ese proyecto. Sin el
+ * desglose el filtro sería opaco —las tarjetas desaparecerían sin motivo
+ * visible—, y con un componente aparte habría dos vocabularios de color para
+ * la misma idea.
  */
-export function PriorityBadge({ priority }: { priority: TaskPriority }) {
+export function PriorityBadge({
+  priority,
+  count,
+}: {
+  priority: TaskPriority;
+  count?: number;
+}) {
+  const etiqueta = PRIORITY_LABEL[priority];
   return (
     <span
-      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium ${PRIORITY_STYLE[priority]}`}
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${PRIORITY_STYLE[priority]}`}
+      // El texto visible queda en «Alta 2», que fuera de contexto no dice de
+      // qué son esos 2. El nombre accesible sí lo dice.
+      {...(count !== undefined
+        ? { 'aria-label': `${etiqueta}: ${count} ${count === 1 ? 'tarea' : 'tareas'}` }
+        : {})}
     >
-      {PRIORITY_LABEL[priority]}
+      <span aria-hidden={count !== undefined}>{etiqueta}</span>
+      {count !== undefined && (
+        <span aria-hidden className="tabular-nums font-semibold">
+          {count}
+        </span>
+      )}
     </span>
   );
 }
