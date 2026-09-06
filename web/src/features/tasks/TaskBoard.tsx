@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react';
 import {
+  closestCenter,
   DndContext,
   DragOverlay,
   MouseSensor,
@@ -10,6 +11,11 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
 import { Columns3, Plus } from 'lucide-react';
 import { Button } from '../../components/ui/Button.tsx';
 import { ErrorState, Skeleton } from '../../components/ui/States.tsx';
@@ -28,7 +34,7 @@ import { useUpdateColumn } from '../columns/api.ts';
 import { ColumnManagerDialog } from '../columns/ColumnManagerDialog.tsx';
 import { TaskCard } from './TaskCard.tsx';
 import { TaskFormDialog } from './TaskFormDialog.tsx';
-import { useDeleteTask, useTasks, useUpdateTask } from './api.ts';
+import { useDeleteTask, useReorderTask, useTasks, useUpdateTask } from './api.ts';
 
 export function TaskBoard({
   projectId,
@@ -67,6 +73,7 @@ export function TaskBoard({
   });
 
   const mover = useUpdateTask();
+  const reordenar = useReorderTask();
   const borrar = useDeleteTask();
 
   const [creandoEn, setCreandoEn] = useState<ProjectColumnSummary | null>(null);
@@ -144,23 +151,136 @@ export function TaskBoard({
   }
 
   /**
-   * Soltar fuera de una columna, o sobre la de origen, no dispara nada: el
-   * overlay vuelve solo a su sitio con la animación de la librería. Es el
-   * «se devuelve a su posición original» sin escribir una línea de física.
+   * Al soltar una tarjeta arrastrada:
+   *
+   * Se evalúa si el destino es la misma columna (reordenación vertical) o una columna distinta.
+   *
+   * 1. Misma columna:
+   *    - Si la columna no tiene `sort === 'manual'`, el reordenado vertical queda estrictamente
+   *      bloqueado para no cambiar la configuración a escondidas (SL-15).
+   *    - Si es manual, se calculan las vecinas inmediata anterior y posterior (`previousTaskId` y `nextTaskId`)
+   *      tras resolver la nueva posición con `arrayMove`, y se envía al endpoint fraccionario.
+   *
+   * 2. Distinta columna:
+   *    - Mover entre columnas funciona siempre, sin importar el orden de ambas columnas.
+   *    - Si el destino es manual, se calcula la posición de inserción deseada y se usa el reordenado.
+   *    - Si el destino es automático, se delega en el parche de tarea para que el motor aplique su orden.
    */
   function alSoltar(evento: DragEndEvent): void {
     setArrastrada(null);
-    const destino = evento.over?.id as string | undefined;
-    if (!destino) return;
+    const { active, over } = evento;
+    if (!over || !tareas.data) return;
 
-    const task = tareas.data?.find((t) => t.id === evento.active.id);
-    if (!task || task.columnId === destino) return;
+    const activeTaskId = String(active.id);
+    const overId = String(over.id);
 
-    // A diferencia de las flechas, que solo ofrecen la transición contigua por
-    // espacio en la tarjeta, aquí se permite cualquier columna: soltar en
-    // «Completada» desde «Por hacer» es un gesto deliberado, y el dominio no
-    // prohíbe esa transición. El trigger sella `completed_at` igual.
-    moverTarea(task, destino, 'arrastre');
+    const task = tareas.data.find((t) => t.id === activeTaskId);
+    if (!task) return;
+
+    // Determinar la columna de destino:
+    // El objetivo `over.id` puede ser directamente la columna (droppable)
+    // o bien una tarjeta que reside en esa columna (sortable).
+    const columnaDestinoDirecta = columnas.find((c) => c.id === overId);
+    const tareaDestino = tareas.data?.find((t) => t.id === overId);
+    const destinoColumnaId = columnaDestinoDirecta?.id ?? tareaDestino?.columnId;
+
+    if (!destinoColumnaId) return;
+
+    const origenColumnaId = task.columnId;
+    const colOrigen = columnas.find((c) => c.id === origenColumnaId);
+    const colDestino = columnas.find((c) => c.id === destinoColumnaId);
+
+    if (!colOrigen || !colDestino) return;
+
+    // CASO 1: Reordenado dentro de la misma columna
+    if (origenColumnaId === destinoColumnaId) {
+      // Bloqueo estricto: en columnas con orden automático (por prioridad o fecha),
+      // el reordenado vertical no altera nada y no dispara ninguna petición de red.
+      if (colOrigen.sort !== 'manual') {
+        return;
+      }
+
+      // Soltada sobre sí misma: posición inalterada.
+      if (activeTaskId === overId) {
+        return;
+      }
+
+      const tareasDeColumna = tareas.data.filter((t) => t.columnId === origenColumnaId);
+      const indiceViejo = tareasDeColumna.findIndex((t) => t.id === activeTaskId);
+      const indiceNuevo = tareasDeColumna.findIndex((t) => t.id === overId);
+
+      if (indiceViejo === -1) return;
+
+      let listaReordenada: Task[];
+      if (indiceNuevo !== -1) {
+        listaReordenada = arrayMove(tareasDeColumna, indiceViejo, indiceNuevo);
+      } else {
+        // Soltada sobre la columna directamente: se coloca al final.
+        const sinActiva = tareasDeColumna.filter((t) => t.id !== activeTaskId);
+        listaReordenada = [...sinActiva, task];
+      }
+
+      const posicionFinal = listaReordenada.findIndex((t) => t.id === activeTaskId);
+      if (posicionFinal === indiceViejo) return;
+
+      const anterior = listaReordenada[posicionFinal - 1] ?? null;
+      const siguiente = listaReordenada[posicionFinal + 1] ?? null;
+
+      reordenar.mutate({
+        id: activeTaskId,
+        input: {
+          columnId: origenColumnaId,
+          previousTaskId: anterior ? anterior.id : null,
+          nextTaskId: siguiente ? siguiente.id : null,
+        },
+        tareasOptimistas: listaReordenada,
+      });
+      return;
+    }
+
+    // CASO 2: Movimiento hacia otra columna
+    // Mover entre columnas sigue funcionando siempre en cualquier tipo de columna.
+    if (colDestino.sort === 'manual') {
+      const tareasDestino = tareas.data.filter((t) => t.columnId === destinoColumnaId);
+      const indiceOver = tareasDestino.findIndex((t) => t.id === overId);
+
+      let anterior: Task | null = null;
+      let siguiente: Task | null = null;
+      let listaDestino: Task[];
+      const tareaMovida: Task = { ...task, columnId: destinoColumnaId };
+
+      if (indiceOver !== -1) {
+        listaDestino = [
+          ...tareasDestino.slice(0, indiceOver),
+          tareaMovida,
+          ...tareasDestino.slice(indiceOver),
+        ];
+        const pos = indiceOver;
+        anterior = listaDestino[pos - 1] ?? null;
+        siguiente = listaDestino[pos + 1] ?? null;
+      } else {
+        anterior = tareasDestino[tareasDestino.length - 1] ?? null;
+        siguiente = null;
+        listaDestino = [...tareasDestino, tareaMovida];
+      }
+
+      const tareasOrigenRestantes = tareas.data.filter(
+        (t) => t.columnId === origenColumnaId && t.id !== activeTaskId,
+      );
+
+      reordenar.mutate({
+        id: activeTaskId,
+        input: {
+          columnId: destinoColumnaId,
+          previousTaskId: anterior ? anterior.id : null,
+          nextTaskId: siguiente ? siguiente.id : null,
+        },
+        tareasOptimistas: [...tareasOrigenRestantes, ...listaDestino],
+      });
+    } else {
+      // Si la columna destino tiene orden automático, usamos la mutación normal de mover.
+      moverTarea(task, destinoColumnaId, 'arrastre');
+    }
   }
 
   /**
@@ -185,7 +305,7 @@ export function TaskBoard({
         <div className="min-w-0">
           <h2 className="text-sm font-semibold">Tareas</h2>
           <p className="text-xs text-ink-muted">
-            Orden automático: prioridad alta primero, y dentro de cada prioridad, las más recientes
+            Arrastra para mover entre columnas o reordena dentro de columnas con orden manual
           </p>
         </div>
 
@@ -214,9 +334,9 @@ export function TaskBoard({
       {/* Sin esto, un borrado o un movimiento que falla no produce nada
           visible: la tarjeta se queda quieta y el usuario vuelve a pulsar
           creyendo que la interfaz no responde. */}
-      {(borrar.isError || mover.isError) && (
+      {(borrar.isError || mover.isError || reordenar.isError) && (
         <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
-          {messageFor(borrar.error ?? mover.error, 'No se pudo actualizar la tarea.')}
+          {messageFor(borrar.error ?? mover.error ?? reordenar.error, 'No se pudo actualizar la tarea.')}
         </p>
       )}
 
@@ -243,6 +363,7 @@ export function TaskBoard({
         // a 768— y se lee de un vistazo.
         <DndContext
           sensors={sensores}
+          collisionDetection={closestCenter}
           onDragStart={alEmpezarArrastre}
           onDragEnd={alSoltar}
           onDragCancel={() => setArrastrada(null)}
@@ -288,7 +409,12 @@ export function TaskBoard({
               // Cada columna es una región con nombre propio. Sin esto, un
               // lector de pantalla anuncia tres secciones indistinguibles y
               // los tres botones «Añadir» suenan igual.
-              <ColumnaDestino key={col.id} columna={col} arrastrando={arrastrada !== null}>
+              <ColumnaDestino
+                key={col.id}
+                columna={col}
+                arrastrando={arrastrada !== null}
+                esDestinoDistinto={arrastrada !== null && arrastrada.columnId !== col.id}
+              >
                 <header className="mb-2.5 flex items-center gap-2 px-0.5">
                   {/* El punto sigue el color de la CATEGORÍA, no del nombre:
                       «QA» y «En revisión» son ambas trabajo en curso y deben
@@ -346,29 +472,46 @@ export function TaskBoard({
                   </select>
                 </label>
 
+                {/* Si la columna no tiene orden manual, se avisa de forma visible
+                    por qué el reordenado vertical no está disponible (SL-15). */}
+                {col.sort !== 'manual' && (
+                  <p className="mb-2 px-0.5 text-[11px] text-ink-muted">
+                    {col.sort.startsWith('priority')
+                      ? 'Ordenada por prioridad — cambia el orden a manual para reordenar'
+                      : 'Ordenada por fecha — cambia el orden a manual para reordenar'}
+                  </p>
+                )}
+
                 {/* Altura mínima para que una columna vacía no colapse y
                     descuadre el tablero. */}
-                <div className="flex min-h-[7rem] flex-1 flex-col gap-2">
-                  {dentro.map((task) => (
-                    <TaskCard
-                      key={task.id}
-                      task={task}
-                      pending={moviendoId === task.id}
-                      autoFocus={recienMovida === task.id}
-                      anterior={anterior}
-                      siguiente={siguiente}
-                      onMove={(columnId) => moverTarea(task, columnId, 'flecha')}
-                      onEdit={() => setEditando(task)}
-                      onDelete={() => borrarTarea(task)}
-                    />
-                  ))}
+                <SortableContext
+                  id={col.id}
+                  items={dentro.map((t) => t.id)}
+                  strategy={verticalListSortingStrategy}
+                  disabled={col.sort !== 'manual'}
+                >
+                  <div className="flex min-h-[7rem] flex-1 flex-col gap-2">
+                    {dentro.map((task) => (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        pending={moviendoId === task.id}
+                        autoFocus={recienMovida === task.id}
+                        anterior={anterior}
+                        siguiente={siguiente}
+                        onMove={(columnId) => moverTarea(task, columnId, 'flecha')}
+                        onEdit={() => setEditando(task)}
+                        onDelete={() => borrarTarea(task)}
+                      />
+                    ))}
 
-                  {dentro.length === 0 && (
-                    <p className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-ink-muted">
-                      {hayFiltro ? 'Sin tareas que coincidan' : 'Sin tareas'}
-                    </p>
-                  )}
-                </div>
+                    {dentro.length === 0 && (
+                      <p className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-ink-muted">
+                        {hayFiltro ? 'Sin tareas que coincidan' : 'Sin tareas'}
+                      </p>
+                    )}
+                  </div>
+                </SortableContext>
 
                 <Button
                   variant="ghost"
@@ -449,10 +592,12 @@ export function TaskBoard({
 function ColumnaDestino({
   columna,
   arrastrando,
+  esDestinoDistinto,
   children,
 }: {
   columna: ProjectColumnSummary;
   arrastrando: boolean;
+  esDestinoDistinto: boolean;
   children: ReactNode;
 }) {
   // El `id` de la zona ES el de la columna: así `onDragEnd` recibe el destino
@@ -464,21 +609,15 @@ function ColumnaDestino({
       ref={setNodeRef}
       aria-label={columna.name}
       /**
-       * La columna es la unidad de destino, y tiene que verse así.
-       *
-       * Arrastrar cambia el **estado** de la tarea, no su posición: el orden lo
-       * fija PostgreSQL (`priority DESC, created_at DESC`). Una interfaz que
-       * abriera huecos entre tarjetas o desplazara a las vecinas prometería un
-       * control de orden que el modelo no tiene, y la tarjeta acabaría en un
-       * sitio distinto del señalado. Por eso al sobrevolar se realza la columna
-       * **entera** con un anillo, y nunca se dibuja un punto de inserción.
+       * La columna es la unidad de destino para movimientos inter-columna.
+       * Al sobrevolarla desde otra columna, se resalta con un anillo y un mensaje indicador.
        */
       className={`relative flex w-[82vw] shrink-0 snap-center flex-col rounded-xl border p-3 transition-colors lg:w-auto
         ${isOver ? 'border-brand bg-brand/5 ring-2 ring-brand/40' : 'border-border bg-canvas/60'}
         ${arrastrando && !isOver ? 'border-dashed' : ''}`}
     >
-      {/* Dice a dónde va la tarjeta, que es lo único que el gesto decide. */}
-      {isOver && (
+      {/* Informa a qué columna se moverá la tarjeta solo si se arrastra desde otra columna distinta */}
+      {isOver && esDestinoDistinto && (
         <p className="pointer-events-none absolute inset-x-3 top-3 z-10 rounded-lg bg-brand px-2.5 py-1 text-center text-xs font-medium text-white shadow">
           Soltar para mover a {columna.name}
         </p>

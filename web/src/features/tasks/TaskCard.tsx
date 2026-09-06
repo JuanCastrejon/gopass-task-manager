@@ -1,5 +1,6 @@
-import { useEffect, useRef, type SyntheticEvent } from 'react';
-import { useDraggable } from '@dnd-kit/core';
+import { useEffect, useRef, type CSSProperties, type SyntheticEvent } from 'react';
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { ArrowLeft, ArrowRight, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/Button.tsx';
 import { PriorityBadge } from '../../components/ui/Badge.tsx';
@@ -68,12 +69,20 @@ export function TaskCard({
    * `tabIndex={0}`, que romperían la semántica de este `<article>` y
    * duplicarían el punto de tabulación que ya tienen las flechas. El teclado
    * no lo cubre el arrastre, lo cubren ellas (ADR-018).
+   *
+   * `useSortable` aporta además `transform` y `transition` para que las tarjetas
+   * contiguas se deslicen suavemente abriendo hueco al arrastrar dentro de una columna.
    */
-  const { setNodeRef, listeners, isDragging } = useDraggable({
+  const { setNodeRef, listeners, isDragging, transform, transition } = useSortable({
     id: task.id,
-    data: { status: task.status },
+    data: { status: task.status, columnId: task.columnId },
     disabled: pending,
   });
+
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
 
   // Al moverse, la tarjeta se desmonta de una columna y se monta en otra: el
   // botón que tenía el foco desaparece y el foco se caería al `body`, dejando
@@ -88,6 +97,7 @@ export function TaskCard({
         focusRef.current = nodo;
         setNodeRef(nodo);
       }}
+      style={style}
       tabIndex={-1}
       aria-busy={pending || undefined}
       {...listeners}
@@ -95,7 +105,7 @@ export function TaskCard({
       // el desplazamiento del carrusel antes de que el usuario llegue a
       // mantener pulsado. El sensor táctil solo reclama el gesto cuando se
       // cumplen sus 250 ms.
-      className={`select-none rounded-lg border border-border bg-surface p-3 transition
+      className={`select-none rounded-lg border border-border bg-surface p-3 transition-colors
         ${isDragging ? 'opacity-40' : ''}
         ${pending ? 'pointer-events-none opacity-60' : 'cursor-grab active:cursor-grabbing'}`}
     >

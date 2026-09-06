@@ -18,10 +18,17 @@ export const TASK_PRIORITIES: readonly TaskPriority[] = ['LOW', 'MEDIUM', 'HIGH'
  * no preferencia de cada navegador: se guarda en la columna, así que todo el
  * equipo ve lo mismo y sobrevive a cambiar de equipo.
  */
-export const COLUMN_SORTS = ['priority_desc', 'priority_asc', 'created_desc', 'created_asc'] as const;
+export const COLUMN_SORTS = [
+  'manual',
+  'priority_desc',
+  'priority_asc',
+  'created_desc',
+  'created_asc',
+] as const;
 export type ColumnSort = (typeof COLUMN_SORTS)[number];
 
 export const COLUMN_SORT_LABEL: Record<ColumnSort, string> = {
+  manual: 'Manual',
   priority_desc: 'Prioridad alta primero',
   priority_asc: 'Prioridad baja primero',
   created_desc: 'Más recientes primero',
@@ -96,6 +103,8 @@ export interface Task {
   description: string | null;
   status: TaskStatus;
   priority: TaskPriority;
+  /** Posición fraccionaria calculada por el servidor para el orden manual en la columna. */
+  position: number;
   /** Lo sella la base en la transición a DONE. La API rechaza escribirlo. */
   completedAt: string | null;
   createdAt: string;

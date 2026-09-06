@@ -123,3 +123,75 @@ export function useDeleteTask() {
     onSuccess: invalidate,
   });
 }
+
+export interface ReorderTaskInput {
+  columnId: string;
+  previousTaskId: string | null;
+  nextTaskId: string | null;
+}
+
+/**
+ * Reordenación de tareas mediante arrastre vertical o entre columnas.
+ *
+ * A diferencia de las ediciones ordinarias, el gesto de soltar una tarjeta exige
+ * una actualización optimista: la tarjeta debe fijarse inmediatamente en su
+ * destino visual sin esperar el viaje de ida y vuelta al servidor (ADR-018 y SL-15).
+ * Si la petición es rechazada (ej. fallo de red o conflicto), el estado previo se
+ * restaura desde el snapshot guardado en `onMutate`.
+ *
+ * `onSettled` invalida siempre las cuatro familias de claves mediante
+ * `useInvalidateAfterTaskChange`: PostgreSQL sella el valor fraccionario final de
+ * `position` y cualquier cambio entre columnas repercute en los contadores y límites
+ * WIP de las columnas y en el avance agregado del proyecto.
+ */
+export function useReorderTask() {
+  const client = useQueryClient();
+  const invalidate = useInvalidateAfterTaskChange();
+
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: ReorderTaskInput;
+      tareasOptimistas?: Task[];
+    }) => api.patch<Task>(`/tasks/${id}/reorder`, input),
+    onMutate: async ({ id, input, tareasOptimistas }) => {
+      // Cancelar consultas activas para que un refetch en vuelo no pise el estado optimista.
+      await client.cancelQueries({ queryKey: taskKeys.all });
+
+      // Instantánea previa de todas las entradas de tareas para poder revertir ante errores.
+      const snapshotPrevio = client.getQueriesData<Task[]>({ queryKey: taskKeys.all });
+
+      // Aplicar de inmediato el nuevo orden en la caché local.
+      client.setQueriesData<Task[]>({ queryKey: taskKeys.all }, (previas) => {
+        if (!previas) return previas;
+
+        if (tareasOptimistas) {
+          const mapaOptimistas = new Map(tareasOptimistas.map((t) => [t.id, t]));
+          const noAfectadas = previas.filter((t) => !mapaOptimistas.has(t.id));
+          return [...noAfectadas, ...tareasOptimistas];
+        }
+
+        return previas.map((t) => (t.id === id ? { ...t, columnId: input.columnId } : t));
+      });
+
+      return { snapshotPrevio };
+    },
+    onError: (_err, _variables, context) => {
+      // En caso de fallo en el servidor, revertimos la caché exactamente a como estaba antes del arrastre.
+      if (context?.snapshotPrevio) {
+        for (const [queryKey, data] of context.snapshotPrevio) {
+          client.setQueryData(queryKey, data);
+        }
+      }
+    },
+    onSettled: () => {
+      // Siempre se invalida al terminar para sincronizar posiciones fraccionarias definitivas
+      // y refrescar los contadores de las columnas.
+      invalidate();
+    },
+  });
+}
+
