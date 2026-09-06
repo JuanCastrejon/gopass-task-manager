@@ -1,6 +1,5 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  closestCenter,
   DndContext,
   DragOverlay,
   MouseSensor,
@@ -9,6 +8,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragMoveEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
 import {
@@ -37,6 +37,7 @@ import { LabelManagerDialog } from '../labels/LabelManagerDialog.tsx';
 import { TaskCard } from './TaskCard.tsx';
 import { TaskFormDialog } from './TaskFormDialog.tsx';
 import { useDeleteTask, useReorderTask, useTasks, useUpdateTask } from './api.ts';
+import { crearDetectorTablero, type DatosColisionTablero } from './collision.ts';
 
 export function TaskBoard({
   projectId,
@@ -103,6 +104,22 @@ export function TaskBoard({
   /** Tarjeta que se está arrastrando ahora mismo, para pintarla en el overlay. */
   const [arrastrada, setArrastrada] = useState<Task | null>(null);
 
+  /** Indicador de inserción visible durante el arrastre (SL-20) */
+  const [insercion, setInsercion] = useState<{
+    sobreId: string;
+    posicion: 'before' | 'after';
+    columnaId: string;
+  } | null>(null);
+
+  /** Columna actualmente sobrevolada durante el arrastre (SL-20) */
+  const [columnaSobrevoladaId, setColumnaSobrevoladaId] = useState<string | null>(null);
+
+  /** Aviso de rechazo en cliente cuando se intenta soltar en columna con límite WIP lleno (SL-20) */
+  const [avisoWip, setAvisoWip] = useState<string | null>(null);
+
+  const columnasIds = useMemo(() => new Set(columnas.map((c) => c.id)), [columnas]);
+  const detectorColisiones = useMemo(() => crearDetectorTablero(() => columnasIds), [columnasIds]);
+
   /**
    * Proyección del movimiento mientras la petición vuela.
    *
@@ -163,8 +180,53 @@ export function TaskBoard({
   }
 
   function alEmpezarArrastre(evento: DragStartEvent): void {
+    setAvisoWip(null);
+    setInsercion(null);
+    setColumnaSobrevoladaId(null);
     const task = tareas.data?.find((t) => t.id === evento.active.id);
     setArrastrada(task ?? null);
+  }
+
+  function alMoverArrastre(evento: DragMoveEvent): void {
+    const colision = evento.collisions?.[0];
+    if (!colision || !evento.over) {
+      setInsercion(null);
+      setColumnaSobrevoladaId(null);
+      return;
+    }
+
+    const colisionData = colision.data as Partial<DatosColisionTablero> | undefined;
+    const columnaId = colisionData?.columnId;
+    const posicion = colisionData?.relativePosition ?? 'after';
+    const sobreId = String(colision.id);
+
+    setColumnaSobrevoladaId(columnaId ?? null);
+
+    if (!columnaId) {
+      setInsercion(null);
+      return;
+    }
+
+    const col = columnas.find((c) => c.id === columnaId);
+    // Solo en columnas con orden manual. En columnas automáticas NUNCA se muestra indicador (SL-20).
+    if (!col || col.sort !== 'manual') {
+      setInsercion(null);
+      return;
+    }
+
+    // Si la columna destino tiene el límite de WIP lleno, no es destino válido y no se muestra indicador
+    const esDistinta = arrastrada ? arrastrada.columnId !== columnaId : false;
+    const tareasDestino = tareas.data?.filter((t) => t.columnId === columnaId) ?? [];
+    if (esDistinta && col.wipLimit !== null && tareasDestino.length >= col.wipLimit) {
+      setInsercion(null);
+      return;
+    }
+
+    setInsercion({
+      sobreId,
+      posicion,
+      columnaId,
+    });
   }
 
   /**
@@ -185,7 +247,9 @@ export function TaskBoard({
    */
   function alSoltar(evento: DragEndEvent): void {
     setArrastrada(null);
-    const { active, over } = evento;
+    setInsercion(null);
+    setColumnaSobrevoladaId(null);
+    const { active, over, collisions } = evento;
     if (!over || !tareas.data) return;
 
     const activeTaskId = String(active.id);
@@ -208,6 +272,25 @@ export function TaskBoard({
     const colDestino = columnas.find((c) => c.id === destinoColumnaId);
 
     if (!colOrigen || !colDestino) return;
+
+    // VALIDACIÓN DE LÍMITE DE TRABAJO EN CURSO (WIP):
+    // Si la columna destino tiene un límite definido y la tarjeta proviene de otra columna,
+    // se comprueba si la columna ya ha alcanzado su capacidad máxima.
+    // En tal caso, se bloquea la acción en el cliente con un aviso visible en role="alert"
+    // y se devuelve la tarjeta a su origen SIN emitir peticiones de red condenadas al fallo (SL-20).
+    if (origenColumnaId !== destinoColumnaId && colDestino.wipLimit !== null) {
+      const tareasDestinoActuales = tareas.data.filter((t) => t.columnId === destinoColumnaId);
+      if (tareasDestinoActuales.length >= colDestino.wipLimit) {
+        setAvisoWip(
+          `No se puede mover "${task.title}" a "${colDestino.name}": ha alcanzado su límite de trabajo en curso (${colDestino.wipLimit}).`,
+        );
+        return;
+      }
+    }
+
+    // Obtenemos la posición relativa ('before' o 'after') calculada por el detector compuesto
+    const colisionData = collisions?.[0]?.data as Partial<DatosColisionTablero> | undefined;
+    const posicionRelativa = colisionData?.relativePosition ?? 'before';
 
     // CASO 1: Reordenado dentro de la misma columna
     if (origenColumnaId === destinoColumnaId) {
@@ -267,15 +350,20 @@ export function TaskBoard({
       const tareaMovida: Task = { ...task, columnId: destinoColumnaId };
 
       if (indiceOver !== -1) {
+        // Soltada sobre una tarjeta concreta de la columna destino:
+        // Si el puntero incidió en la mitad superior ('before'), se inserta antes (en indiceOver).
+        // Si incidió en la mitad inferior ('after'), se inserta después (en indiceOver + 1).
+        const indiceInsercion = posicionRelativa === 'after' ? indiceOver + 1 : indiceOver;
         listaDestino = [
-          ...tareasDestino.slice(0, indiceOver),
+          ...tareasDestino.slice(0, indiceInsercion),
           tareaMovida,
-          ...tareasDestino.slice(indiceOver),
+          ...tareasDestino.slice(indiceInsercion),
         ];
-        const pos = indiceOver;
+        const pos = indiceInsercion;
         anterior = listaDestino[pos - 1] ?? null;
         siguiente = listaDestino[pos + 1] ?? null;
       } else {
+        // Soltada sobre el contenedor de la columna directamente (espacio inferior o columna vacía)
         anterior = tareasDestino[tareasDestino.length - 1] ?? null;
         siguiente = null;
         listaDestino = [...tareasDestino, tareaMovida];
@@ -387,9 +475,9 @@ export function TaskBoard({
       {/* Sin esto, un borrado o un movimiento que falla no produce nada
           visible: la tarjeta se queda quieta y el usuario vuelve a pulsar
           creyendo que la interfaz no responde. */}
-      {(borrar.isError || mover.isError || reordenar.isError) && (
+      {(borrar.isError || mover.isError || reordenar.isError || avisoWip) && (
         <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
-          {messageFor(borrar.error ?? mover.error ?? reordenar.error, 'No se pudo actualizar la tarea.')}
+          {avisoWip ?? messageFor(borrar.error ?? mover.error ?? reordenar.error, 'No se pudo actualizar la tarea.')}
         </p>
       )}
 
@@ -416,10 +504,15 @@ export function TaskBoard({
         // a 768— y se lee de un vistazo.
         <DndContext
           sensors={sensores}
-          collisionDetection={closestCenter}
+          collisionDetection={detectorColisiones}
           onDragStart={alEmpezarArrastre}
+          onDragMove={alMoverArrastre}
           onDragEnd={alSoltar}
-          onDragCancel={() => setArrastrada(null)}
+          onDragCancel={() => {
+            setArrastrada(null);
+            setInsercion(null);
+            setColumnaSobrevoladaId(null);
+          }}
           // Umbral horizontal generoso: el autoscroll tiene que arrancar antes
           // de que el pulgar invada el borde de la pantalla, donde iOS y
           // Android reservan su propio gesto de «volver atrás».
@@ -482,6 +575,11 @@ export function TaskBoard({
             // depende de este tablero concreto.
             const anterior = columnas[indice - 1] ?? null;
             const siguiente = columnas[indice + 1] ?? null;
+            const esDestinoDistinto = arrastrada !== null && arrastrada.columnId !== col.id;
+            const destinoInvalidoPorWip =
+              esDestinoDistinto && col.wipLimit !== null && dentro.length >= col.wipLimit;
+            const estaSobrevolada = columnaSobrevoladaId === col.id;
+
             return (
               // Cada columna es una región con nombre propio. Sin esto, un
               // lector de pantalla anuncia tres secciones indistinguibles y
@@ -490,7 +588,10 @@ export function TaskBoard({
                 key={col.id}
                 columna={col}
                 arrastrando={arrastrada !== null}
-                esDestinoDistinto={arrastrada !== null && arrastrada.columnId !== col.id}
+                esDestinoDistinto={esDestinoDistinto}
+                estaSobrevolada={estaSobrevolada}
+                destinoInvalidoPorWip={destinoInvalidoPorWip}
+                recuentoActual={dentro.length}
               >
                 <header className="mb-2 flex items-center gap-1.5 px-0.5">
                   {/* El punto sigue el color de la CATEGORÍA, no del nombre:
@@ -568,25 +669,58 @@ export function TaskBoard({
                   disabled={col.sort !== 'manual'}
                 >
                   <div className="flex min-h-[7rem] flex-1 flex-col gap-2">
-                    {dentro.map((task) => (
-                      <TaskCard
-                        key={task.id}
-                        task={task}
-                        pending={moviendoId === task.id}
-                        autoFocus={recienMovida === task.id}
-                        anterior={anterior}
-                        siguiente={siguiente}
-                        columnasDone={columnasDone}
-                        onMove={(columnId) => moverTarea(task, columnId, 'flecha')}
-                        onEdit={() => setEditando(task)}
-                        onDelete={() => borrarTarea(task)}
-                      />
-                    ))}
+                    {dentro.map((task) => {
+                      const mostrarAntes =
+                        col.sort === 'manual' &&
+                        !destinoInvalidoPorWip &&
+                        insercion?.columnaId === col.id &&
+                        insercion.sobreId === task.id &&
+                        insercion.posicion === 'before';
+
+                      const mostrarDespues =
+                        col.sort === 'manual' &&
+                        !destinoInvalidoPorWip &&
+                        insercion?.columnaId === col.id &&
+                        insercion.sobreId === task.id &&
+                        insercion.posicion === 'after';
+
+                      return (
+                        <div key={task.id} className="flex flex-col gap-2">
+                          {mostrarAntes && <IndicadorInsercionLinea />}
+                          <TaskCard
+                            task={task}
+                            pending={moviendoId === task.id}
+                            autoFocus={recienMovida === task.id}
+                            anterior={anterior}
+                            siguiente={siguiente}
+                            columnasDone={columnasDone}
+                            onMove={(columnId) => moverTarea(task, columnId, 'flecha')}
+                            onEdit={() => setEditando(task)}
+                            onDelete={() => borrarTarea(task)}
+                          />
+                          {mostrarDespues && <IndicadorInsercionLinea />}
+                        </div>
+                      );
+                    })}
+
+                    {/* Indicador de inserción al final cuando se sobrevuela el espacio vacío de la columna */}
+                    {col.sort === 'manual' &&
+                      !destinoInvalidoPorWip &&
+                      dentro.length > 0 &&
+                      insercion?.columnaId === col.id &&
+                      insercion.sobreId === col.id && (
+                        <IndicadorInsercionLinea />
+                      )}
 
                     {dentro.length === 0 && (
-                      <p className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-ink-muted">
-                        {hayFiltro ? 'Sin tareas que coincidan' : 'Sin tareas'}
-                      </p>
+                      <div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-ink-muted">
+                        {col.sort === 'manual' &&
+                          !destinoInvalidoPorWip &&
+                          insercion?.columnaId === col.id && (
+                            <IndicadorInsercionLinea />
+                          )}
+                        <p>{hayFiltro ? 'Sin tareas que coincidan' : 'Sin tareas'}</p>
+                      </div>
                     )}
                   </div>
                 </SortableContext>
@@ -667,6 +801,25 @@ export function TaskBoard({
 }
 
 /**
+ * Indicador visual de inserción para orden manual (SL-20).
+ *
+ * Muestra una línea horizontal del color de marca (`bg-brand`) con un punto de inicio
+ * que sigue con precisión al puntero antes o después de cada tarjeta.
+ */
+function IndicadorInsercionLinea() {
+  return (
+    <div
+      data-testid="indicador-insercion"
+      className="relative -my-1 flex items-center py-1 transition-all"
+      aria-hidden="true"
+    >
+      <div className="h-0.5 w-full rounded-full bg-brand shadow-xs" />
+      <div className="absolute left-0 size-2 -translate-x-0.5 rounded-full border-2 border-surface bg-brand" />
+    </div>
+  );
+}
+
+/**
  * La columna es la zona donde se sueltan las tarjetas. Es un componente aparte
  * porque `useDroppable` es un hook y las columnas se pintan dentro de un
  * `.map`.
@@ -678,16 +831,23 @@ function ColumnaDestino({
   columna,
   arrastrando,
   esDestinoDistinto,
+  estaSobrevolada,
+  destinoInvalidoPorWip,
+  recuentoActual,
   children,
 }: {
   columna: ProjectColumnSummary;
   arrastrando: boolean;
   esDestinoDistinto: boolean;
+  estaSobrevolada: boolean;
+  destinoInvalidoPorWip: boolean;
+  recuentoActual: number;
   children: ReactNode;
 }) {
   // El `id` de la zona ES el de la columna: así `onDragEnd` recibe el destino
   // sin traducir nada. Antes era el estado, cuando ambos coincidían.
   const { setNodeRef, isOver } = useDroppable({ id: columna.id });
+  const activa = isOver || estaSobrevolada;
 
   return (
     <section
@@ -697,16 +857,34 @@ function ColumnaDestino({
        * La columna es la unidad de destino para movimientos inter-columna.
        * En desktop (`lg`), adopta un ancho fijo de 272 px con shrink-0 (estilo Trello)
        * y resalta con anillo al arrastrar sobre ella.
+       *
+       * Si el límite de trabajo en curso (WIP) está excedido para una tarjeta proveniente
+       * de otra columna, se resalta en tono de advertencia/error (danger) indicando que es
+       * un destino no válido (SL-20).
        */
       className={`relative flex w-[82vw] shrink-0 snap-center flex-col rounded-xl border p-3 transition-colors lg:w-[272px] lg:shrink-0
-        ${isOver ? 'border-brand bg-brand/5 ring-2 ring-brand/40' : 'border-border bg-canvas/60'}
-        ${arrastrando && !isOver ? 'border-dashed' : ''}`}
+        ${
+          activa
+            ? destinoInvalidoPorWip
+              ? 'border-danger bg-danger-soft/20 ring-2 ring-danger/40'
+              : 'border-brand bg-brand/5 ring-2 ring-brand/40'
+            : 'border-border bg-canvas/60'
+        }
+        ${arrastrando && !activa ? 'border-dashed' : ''}`}
     >
-      {/* Informa a qué columna se moverá la tarjeta solo si se arrastra desde otra columna distinta */}
-      {isOver && esDestinoDistinto && (
-        <p className="pointer-events-none absolute inset-x-3 top-3 z-10 rounded-lg bg-brand px-2.5 py-1 text-center text-xs font-medium text-white shadow">
-          Soltar para mover a {columna.name}
-        </p>
+      {/* Informa a qué columna se moverá la tarjeta o si el límite está alcanzado */}
+      {activa && esDestinoDistinto && (
+        destinoInvalidoPorWip ? (
+          <p className="pointer-events-none absolute inset-x-3 top-3 z-10 rounded-lg bg-danger px-2.5 py-1 text-center text-xs font-medium text-white shadow">
+            Límite alcanzado ({recuentoActual}/{columna.wipLimit}) — destino no válido
+          </p>
+        ) : (
+          <p className="pointer-events-none absolute inset-x-3 top-3 z-10 rounded-lg bg-brand px-2.5 py-1 text-center text-xs font-medium text-white shadow">
+            {columna.sort === 'manual'
+              ? `Soltar para mover a ${columna.name}`
+              : `Soltar para mover a ${columna.name} (se reordenará automáticamente)`}
+          </p>
+        )
       )}
       {children}
     </section>
