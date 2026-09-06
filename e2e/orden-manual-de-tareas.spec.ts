@@ -85,43 +85,61 @@ test('el orden manual dentro de una columna sobrevive a la recarga', async ({ pa
   await expect(porHacerRecargada.locator('article h4')).toHaveText([tarea2, tarea1]);
 });
 
-test('una columna con orden automático explica por qué no se reordena y bloquea el arrastre interno', async ({
+test('una columna con orden automatico explica por que no se reordena y bloquea el arrastre interno', async ({
   page,
 }) => {
-  // En el seed, «Telepeaje — integración de operadores» tiene la columna «Por hacer»
-  // configurada explícitamente con `sort = 'created_asc'`.
+  const sufijo = Date.now().toString(36);
+  const proyecto = `E2E orden auto ${sufijo}`;
+  const tarea1 = `Tarea Alfa ${sufijo}`;
+  const tarea2 = `Tarea Beta ${sufijo}`;
+
   await page.goto('/');
+  await page.getByRole('button', { name: 'Nuevo proyecto' }).click();
+  const dialogo = page.getByRole('dialog');
+  await dialogo.getByLabel('Nombre').fill(proyecto);
+  await dialogo.getByRole('button', { name: 'Crear proyecto' }).click();
+
   await page
     .locator('article')
-    .filter({ hasText: 'Telepeaje — integración de operadores' })
+    .filter({ hasText: proyecto })
     .getByRole('link', { name: /^Abrir tareas de/ })
     .click();
-  await expect(
-    page.getByRole('heading', { level: 1, name: 'Telepeaje — integración de operadores' }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: proyecto })).toBeVisible();
 
   const porHacer = page.getByRole('region', { name: 'Por hacer' });
 
-  // 1. Comprobar que el aviso explicativo está visible en la columna.
+  // Configurar la columna con orden automatico (por fecha de creacion)
+  await porHacer.getByLabel('Ordenar Por hacer por').selectOption('created_asc');
+
+  // 1. Comprobar que el aviso explicativo esta visible en la columna.
   await expect(
     porHacer.getByText('Ordenada por fecha — cambia el orden a manual para reordenar'),
   ).toBeVisible();
 
-  // 2. Orden inicial determinado por la fecha de creación en el seed.
-  const titulosEsperados = [
-    'Homologar lectores TAG del corredor norte',
-    'Documentar el protocolo de contingencia sin red',
-  ];
-  await expect(porHacer.locator('article h4')).toHaveText(titulosEsperados);
+  // --- Crear dos tareas en «Por hacer» ---
+  await porHacer.getByRole('button', { name: 'Añadir tarea a Por hacer' }).click();
+  const dialogoTarea1 = page.getByRole('dialog');
+  await dialogoTarea1.getByLabel('Título').fill(tarea1);
+  await dialogoTarea1.getByRole('button', { name: 'Crear tarea' }).click();
+  await expect(porHacer.getByText(tarea1)).toBeVisible();
+
+  await porHacer.getByRole('button', { name: 'Añadir tarea a Por hacer' }).click();
+  const dialogoTarea2 = page.getByRole('dialog');
+  await dialogoTarea2.getByLabel('Título').fill(tarea2);
+  await dialogoTarea2.getByRole('button', { name: 'Crear tarea' }).click();
+  await expect(porHacer.getByText(tarea2)).toBeVisible();
+
+  // 2. Orden inicial determinado por la fecha de creacion.
+  await expect(porHacer.locator('article h4')).toHaveText([tarea1, tarea2]);
 
   // 3. Intentar arrastrar la segunda tarjeta por encima de la primera.
-  const tarjeta1 = porHacer.locator('article').filter({ hasText: titulosEsperados[0] });
-  const tarjeta2 = porHacer.locator('article').filter({ hasText: titulosEsperados[1] });
+  const tarjeta1 = porHacer.locator('article').filter({ hasText: tarea1 });
+  const tarjeta2 = porHacer.locator('article').filter({ hasText: tarea2 });
 
   await arrastrarSobre(page, tarjeta2, tarjeta1);
 
-  // No debe cambiar el orden en pantalla ni emitir peticiones de reordenación.
-  await expect(porHacer.locator('article h4')).toHaveText(titulosEsperados);
+  // No debe cambiar el orden en pantalla ni emitir peticiones de reordenacion.
+  await expect(porHacer.locator('article h4')).toHaveText([tarea1, tarea2]);
 
   // 4. Tras recargar, el orden permanece exactamente igual.
   await page.reload();
@@ -129,5 +147,5 @@ test('una columna con orden automático explica por qué no se reordena y bloque
   await expect(
     porHacerRecargada.getByText('Ordenada por fecha — cambia el orden a manual para reordenar'),
   ).toBeVisible();
-  await expect(porHacerRecargada.locator('article h4')).toHaveText(titulosEsperados);
+  await expect(porHacerRecargada.locator('article h4')).toHaveText([tarea1, tarea2]);
 });
