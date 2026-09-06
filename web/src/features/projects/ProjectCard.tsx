@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { ArrowRight, Pencil, Trash2 } from 'lucide-react';
 import { Link } from '../../lib/router.tsx';
 import { Button } from '../../components/ui/Button.tsx';
+import { PriorityBadge } from '../../components/ui/Badge.tsx';
 import { ProgressBar } from '../../components/ui/ProgressBar.tsx';
 import { ProjectFormDialog } from './ProjectFormDialog.tsx';
 import { DeleteProjectDialog } from './DeleteProjectDialog.tsx';
-import type { ProjectSummary } from '../../types/api.ts';
+import { TASK_PRIORITIES, type ProjectSummary } from '../../types/api.ts';
 
 export function ProjectCard({ project }: { project: ProjectSummary }) {
   const [editando, setEditando] = useState(false);
@@ -42,6 +43,23 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
       <p className="mt-1.5 line-clamp-2 min-h-[2.5rem] text-sm text-ink-muted">
         {project.description ?? 'Sin descripción'}
       </p>
+
+      {/* El desglose va ANTES del bloque `mt-auto`, no dentro de la fila de
+          progreso. Al precederlo, el margen automático absorbe la diferencia
+          de altura y los pies de todas las tarjetas de una fila siguen
+          alineados aunque unas tengan tres píldoras y otras ninguna. Metido
+          junto a la barra habría que comprimirla a unos 90 px en un móvil.
+
+          Solo se pintan las prioridades con tareas: tres ceros en un proyecto
+          recién creado son ruido, y quitarlos no descuadra nada porque la
+          alineación no depende de esta fila. */}
+      {project.taskCount > 0 && (
+        <div className="mt-2.5 flex flex-wrap gap-1">
+          {TASK_PRIORITIES.filter((p) => project.byPriority[p] > 0).map((p) => (
+            <PriorityBadge key={p} priority={p} count={project.byPriority[p]} />
+          ))}
+        </div>
+      )}
 
       <div className="mt-auto space-y-1.5 pt-4">
         <div className="flex items-baseline justify-between text-xs">
