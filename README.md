@@ -2,11 +2,31 @@
 
 Gestión de tareas por proyectos. **React 18 · Node/Express · PostgreSQL 16.**
 
+## Requisitos
+
+**Para levantar el proyecto solo hace falta Docker.** Node, npm y PostgreSQL viven dentro de los contenedores; no hay que instalarlos en el equipo ni hacer coincidir versiones con las del anfitrión.
+
+| | Versión | Por qué esa |
+|---|---|---|
+| **Docker Engine** | 20.10 o superior | Necesario para `healthcheck` y la sintaxis de `depends_on: condition` que usa `docker-compose.yml` |
+| **Docker Compose** | v2 (el comando `docker compose`, sin guion) | El archivo no declara `version:`, que v1 exige |
+
+Comprobado con Docker 29.7.2 y Compose 5.5.0. Si `docker compose version` responde, está todo.
+
 ```bash
 docker compose up --build
 ```
 
-Un solo requisito: Docker. Levanta la base, aplica migraciones y siembra datos de ejemplo.
+Levanta PostgreSQL, aplica las once migraciones, siembra los datos de ejemplo y publica la aplicación. La primera vez tarda un par de minutos construyendo las imágenes; las siguientes, segundos.
+
+**Solo si vas a trabajar fuera de los contenedores** hacen falta además:
+
+| | Versión | Por qué esa |
+|---|---|---|
+| **Node.js** | 22 recomendada, 20 el mínimo | `package.json` declara `"engines": { "node": ">=20" }`; las imágenes y la integración continua usan 22, así que es la única versión con la que se comprueba de verdad |
+| **npm** | 10 o superior | La que acompaña a Node 20 y 22 |
+
+Ese camino está descrito más abajo, en **Desarrollo fuera de contenedores**. No hace falta para evaluar el proyecto.
 
 | | |
 |---|---|
