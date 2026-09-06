@@ -1,14 +1,20 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/pool.js';
-import { isTaskProjectFkViolation, translatePgError } from '../../db/pg-error.js';
+import { isPgError, isTaskProjectFkViolation, translatePgError } from '../../db/pg-error.js';
 import {
   ColumnNotFoundError,
   ProjectNotFoundError,
   TaskNotFoundError,
+  ValidationError,
   WipLimitReachedError,
 } from '../../http/errors.js';
 import type { TaskRow } from './tasks.mapper.js';
-import type { CreateTaskInput, ListTasksQuery, PatchTaskInput } from './tasks.schema.js';
+import type {
+  CreateTaskInput,
+  ListTasksQuery,
+  PatchTaskInput,
+  ReorderTaskInput,
+} from './tasks.schema.js';
 
 /**
  * Abre una transacción, la confirma si el trabajo termina bien y la revierte
@@ -32,11 +38,11 @@ async function conTransaccion<T>(trabajo: (cliente: PoolClient) => Promise<T>): 
 }
 
 const TASK_FIELDS = `
-  id, project_id, column_id, title, description, status, priority,
+  id, project_id, column_id, title, description, status, priority, position,
   completed_at, created_at, updated_at`;
 
 const TASK_FIELDS_T = `
-  t.id, t.project_id, t.column_id, t.title, t.description, t.status, t.priority,
+  t.id, t.project_id, t.column_id, t.title, t.description, t.status, t.priority, t.position,
   t.completed_at, t.created_at, t.updated_at`;
 
 /**
@@ -101,6 +107,7 @@ const LIST_QUERY = `
   LEFT JOIN project_columns pc ON pc.id = t.column_id
   WHERE p.id = $1
   ORDER BY pc.position,
+    CASE pc.sort WHEN 'manual'        THEN t.position   END ASC,
     CASE pc.sort WHEN 'priority_asc'  THEN t.priority   END ASC,
     CASE pc.sort WHEN 'priority_desc' THEN t.priority   END DESC,
     CASE pc.sort WHEN 'created_asc'   THEN t.created_at END ASC,
@@ -328,6 +335,18 @@ export async function updateTask(id: string, patch: PatchTaskInput): Promise<Tas
         // podría ni corregir una errata.
         if (destino.id !== tarea.column_id) {
           await verificarLimiteDeColumna(cliente, destino.id, id);
+
+          // Al cambiar de columna, la tarea debe recibir una posición nueva al final
+          // de la columna de destino para evitar conservar la posición de la columna
+          // anterior (lo que violaría la restricción unique tasks_position_unica si
+          // ya está ocupada, o dejaría la tarjeta en un orden arbitrario).
+          const maxPosResult = await cliente.query<{ max_pos: number | null }>(
+            'SELECT MAX(position) AS max_pos FROM tasks WHERE column_id = $1',
+            [destino.id],
+          );
+          const nuevaPosicion = (Number(maxPosResult.rows[0]?.max_pos) || 0) + 1024.0;
+          values.push(nuevaPosicion);
+          assignments.push(`position = $${values.length}`);
         }
         values.push(destino.id);
         assignments.push(`column_id = $${values.length}`);
@@ -360,6 +379,154 @@ export async function updateTask(id: string, patch: PatchTaskInput): Promise<Tas
       // Y aquí solo puede significar que el proyecto DESTINO no existe.
       if (isTaskProjectFkViolation(err)) {
         throw new ProjectNotFoundError(patch.projectId ?? 'desconocido', err);
+      }
+      throw translatePgError(err) ?? err;
+    }
+  });
+}
+
+/**
+ * Reordena una tarea dentro de su columna o hacia otra columna entre dos tarjetas vecinas.
+ *
+ * El servidor calcula la nueva posición fraccionaria para que el cliente no maneje
+ * números ni límites de precisión IEEE 754.
+ *
+ * Si se detecta colisión contra la restricción `tasks_position_unica` (23505) o
+ * desbordamiento aritmético por división (22003), se revierte el punto de guardado
+ * (SAVEPOINT), se rebalancea la columna en dos pasos con `ROW_NUMBER() * 1024` y se
+ * reintenta una sola vez. Si el reintento falla, el error se propaga para evitar bucles.
+ */
+export async function reorderTask(id: string, input: ReorderTaskInput): Promise<TaskRow> {
+  return conTransaccion(async (cliente) => {
+    try {
+      const actual = await cliente.query<{
+        id: string;
+        project_id: string;
+        column_id: string;
+        status: string;
+      }>('SELECT id, project_id, column_id, status FROM tasks WHERE id = $1 FOR UPDATE', [id]);
+      const tarea = actual.rows[0];
+      if (!tarea) throw new TaskNotFoundError(id);
+
+      const destino = await columnaDestino(cliente, tarea.project_id, input.columnId);
+
+      if (destino.id !== tarea.column_id) {
+        await verificarLimiteDeColumna(cliente, destino.id, id);
+      }
+
+      if (input.previousTaskId === id || input.nextTaskId === id) {
+        throw new ValidationError([
+          { path: 'body', message: 'Una tarea no puede ser anterior ni siguiente de sí misma.' },
+        ]);
+      }
+
+      const obtenerPosicionVecina = async (vecinaId: string): Promise<number> => {
+        const res = await cliente.query<{ position: number }>(
+          'SELECT position FROM tasks WHERE id = $1 AND column_id = $2',
+          [vecinaId, destino.id],
+        );
+        const fila = res.rows[0];
+        if (!fila) throw new TaskNotFoundError(vecinaId);
+        return Number(fila.position);
+      };
+
+      const calcularPosicion = async (): Promise<number> => {
+        // Ambas vecinas nulas significa «al final de la columna»: petición legítima
+        // y siempre satisfacible (`MAX(position) + 1024.0`, o `1024.0` si está vacía).
+        // Se excluye la propia tarea (id <> $2) por si ya residía en esa columna.
+        if (!input.previousTaskId && !input.nextTaskId) {
+          const res = await cliente.query<{ max_pos: number | null }>(
+            'SELECT MAX(position) AS max_pos FROM tasks WHERE column_id = $1 AND id <> $2',
+            [destino.id, id],
+          );
+          const maxPos = res.rows[0]?.max_pos;
+          return maxPos != null ? Number(maxPos) + 1024.0 : 1024.0;
+        }
+        if (!input.previousTaskId && input.nextTaskId) {
+          const nextPos = await obtenerPosicionVecina(input.nextTaskId);
+          return nextPos / 2.0;
+        }
+        if (input.previousTaskId && !input.nextTaskId) {
+          const prevPos = await obtenerPosicionVecina(input.previousTaskId);
+          return prevPos + 1024.0;
+        }
+        const prevPos = await obtenerPosicionVecina(input.previousTaskId!);
+        const nextPos = await obtenerPosicionVecina(input.nextTaskId!);
+        return (prevPos + nextPos) / 2.0;
+      };
+
+      const rebalancearColumna = async (): Promise<void> => {
+        // Se renumera temporalmente a negativo para que la actualización fila por fila
+        // no colisione con las posiciones positivas existentes en la restricción UNIQUE.
+        await cliente.query(
+          `UPDATE tasks t
+              SET position = -(sub.rn * 1024.0)
+             FROM (
+               SELECT id, ROW_NUMBER() OVER (ORDER BY position ASC, created_at DESC, id) AS rn
+                 FROM tasks
+                WHERE column_id = $1
+             ) sub
+            WHERE t.id = sub.id`,
+          [destino.id],
+        );
+        await cliente.query('UPDATE tasks SET position = -position WHERE column_id = $1', [destino.id]);
+      };
+
+      let nuevaPosicion = await calcularPosicion();
+
+      await cliente.query('SAVEPOINT reorder_intento');
+      try {
+        const result = await cliente.query<TaskRow>(
+          `UPDATE tasks
+              SET column_id = $2,
+                  status = $3,
+                  position = $4
+            WHERE id = $1
+           RETURNING ${TASK_FIELDS}`,
+          [id, destino.id, destino.category, nuevaPosicion],
+        );
+        await cliente.query('RELEASE SAVEPOINT reorder_intento');
+        return result.rows[0]!;
+      } catch (err) {
+        const esColision =
+          isPgError(err) &&
+          ((err.code === '23505' && err.constraint === 'tasks_position_unica') ||
+            err.code === '22003');
+
+        if (!esColision) {
+          await cliente.query('ROLLBACK TO SAVEPOINT reorder_intento');
+          throw err;
+        }
+
+        // Se restaura el punto de guardado de la transacción para limpiar el estado
+        // de error antes de ejecutar el rebalanceo de la columna en conflicto.
+        await cliente.query('ROLLBACK TO SAVEPOINT reorder_intento');
+        await rebalancearColumna();
+
+        // Tras redistribuir las tarjetas con huecos de 1024.0, se recalculan
+        // las posiciones de las vecinas para obtener un nuevo punto medio espacioso.
+        nuevaPosicion = await calcularPosicion();
+
+        const reintento = await cliente.query<TaskRow>(
+          `UPDATE tasks
+              SET column_id = $2,
+                  status = $3,
+                  position = $4
+            WHERE id = $1
+           RETURNING ${TASK_FIELDS}`,
+          [id, destino.id, destino.category, nuevaPosicion],
+        );
+        return reintento.rows[0]!;
+      }
+    } catch (err) {
+      if (
+        err instanceof TaskNotFoundError ||
+        err instanceof WipLimitReachedError ||
+        err instanceof ColumnNotFoundError ||
+        err instanceof ProjectNotFoundError ||
+        err instanceof ValidationError
+      ) {
+        throw err;
       }
       throw translatePgError(err) ?? err;
     }

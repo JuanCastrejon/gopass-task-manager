@@ -97,6 +97,30 @@ export const listTasksQuerySchema = z.object({
   q: z.string().trim().min(1).max(200).optional(),
 });
 
+/**
+ * Reordenación de una tarea entre dos vecinas o al inicio/fin de una columna.
+ *
+ * El cliente envía las tareas entre las que desea ubicar la suya (`previousTaskId`
+ * y `nextTaskId`) y no la posición numérica: así la invariante de cálculo y la
+ * gestión de precisión viven exclusivamente en el servidor, impidiendo que un
+ * cliente defectuoso escriba posiciones arbitrarias.
+ *
+ * Semántica de límites y vecinas nulas:
+ * - `previousTaskId` null y `nextTaskId` presente: ubicar al inicio de la columna (`next / 2`).
+ * - `previousTaskId` presente y `nextTaskId` null: ubicar a continuación de `previousTaskId` (`prev + 1024`).
+ * - Ambas presentes: ubicar en el punto medio entre ambas (`(prev + next) / 2`).
+ * - Ambas nulas: ubicar al final de la columna (`MAX(position) + 1024`, o `1024` si está vacía).
+ */
+export const reorderTaskSchema = z
+  .object({
+    columnId: z.string().uuid('El identificador de columna debe ser un UUID.'),
+    previousTaskId: z.string().uuid('El identificador de la tarea anterior debe ser un UUID.').nullable(),
+    nextTaskId: z.string().uuid('El identificador de la tarea siguiente debe ser un UUID.').nullable(),
+  })
+  .strict(strictMessage);
+
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 export type PatchTaskInput = z.infer<typeof patchTaskSchema>;
 export type ListTasksQuery = z.infer<typeof listTasksQuerySchema>;
+export type ReorderTaskInput = z.infer<typeof reorderTaskSchema>;
+

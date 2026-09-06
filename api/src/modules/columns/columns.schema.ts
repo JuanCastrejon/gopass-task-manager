@@ -10,7 +10,7 @@ import { TASK_STATUSES } from '../tasks/tasks.schema.js';
  * reales: qué tomar ahora, qué lleva más tiempo atascado, y qué acaba de
  * entrar o de salir.
  */
-export const COLUMN_SORTS = ['priority_desc', 'priority_asc', 'created_desc', 'created_asc'] as const;
+export const COLUMN_SORTS = ['priority_desc', 'priority_asc', 'created_desc', 'created_asc', 'manual'] as const;
 export type ColumnSort = (typeof COLUMN_SORTS)[number];
 
 export const columnParamsSchema = z.object({
