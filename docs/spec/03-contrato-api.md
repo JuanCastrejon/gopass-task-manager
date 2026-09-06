@@ -40,7 +40,9 @@ Todas las actualizaciones de esta aplicación son parciales: cambiar el estado d
   "description": "Conexión con los concesionarios viales",
   "taskCount": 8,
   "doneCount": 3,
+  "inProgressCount": 2,
   "byPriority": { "LOW": 2, "MEDIUM": 3, "HIGH": 3 },
+  "wipLimit": 3,
   "progress": 38,
   "createdAt": "2026-09-04T14:02:11.482Z",
   "updatedAt": "2026-09-04T14:02:11.482Z"
@@ -53,8 +55,14 @@ saberse el dominio y a defenderse con `?? 0`. La tarjeta del panel la usa para s
 trabajo urgente, que es la pregunta que se hace desde un catálogo de proyectos; el desglose
 completo se consulta ya dentro del tablero, donde la tarea sí tiene prioridad propia.
 
-En PostgreSQL son tres `COUNT(...) FILTER` colgados del `GROUP BY` que ya calculaba `taskCount` y
-`doneCount`; el objeto lo compone el mapper. Se descartó replicar aquí el `jsonb_object_agg` de
+`wipLimit` es el máximo de tareas simultáneas en `IN_PROGRESS`, y `null` significa «sin límite».
+`inProgressCount` es su numerador. Superarlo devuelve **409 `WIP_LIMIT_REACHED`**, con el límite
+concreto en el `detail` para que el cliente no tenga que recalcularlo. La regla se impone dentro de
+una transacción que bloquea la fila del proyecto: sin ese bloqueo, dos peticiones simultáneas se la
+saltan entre las dos (ADR-022).
+
+En PostgreSQL los conteos son `COUNT(...) FILTER` colgados del `GROUP BY` que ya calculaba
+`taskCount` y `doneCount`; el objeto lo compone el mapper. Se descartó replicar aquí el `jsonb_object_agg` de
 `/stats`: medido sobre 204 proyectos y 20 011 tareas, las columnas no añaden un solo buffer al plan
 y el agregado de `/stats` trasladado a por-proyecto lo multiplicaba por 4,3.
 

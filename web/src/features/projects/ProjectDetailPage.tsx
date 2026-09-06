@@ -88,7 +88,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             </div>
           </header>
 
-          <TaskBoard projectId={projectId} />
+          <TaskBoard projectId={projectId} wipLimit={proyecto.data.wipLimit} />
 
           {editando && (
             <ProjectFormDialog open onClose={() => setEditando(false)} project={proyecto.data} />

@@ -258,6 +258,44 @@ La alternativa (`controllers/`, `services/`, `repositories/` en la raíz, con to
 **Accesibilidad.** Son `<button>` nativos con `aria-label` que nombra la tarea y el destino («Mover "Homologar lectores TAG" a En curso»).
 **Detalle que nadie ve hasta que navega con teclado.** Al moverse, la tarjeta se desmonta de una columna y se monta en otra: el botón que tenía el foco desaparece y el foco caería al `body`. La tarjeta recién movida se enfoca a sí misma al montarse para que quien usa teclado no pierda el punto de referencia.
 
+### ADR-022 — Límite de trabajo en curso, impuesto por el motor y no por la interfaz
+
+**Contexto.** El tablero tenía tres columnas y ninguna regla de flujo. Un tablero sin límite de
+trabajo en curso dibuja columnas pero no gestiona nada: el límite es la idea central del método
+kanban, y lo que hace visible el cuello de botella antes de que el trabajo se acumule.
+
+**Decisión.** `projects.wip_limit integer NULL`, aplicado **solo a `IN_PROGRESS`**, con la
+comprobación dentro de una transacción que bloquea la fila del proyecto con `FOR UPDATE`. Superarlo
+devuelve **409 `WIP_LIMIT_REACHED`** con el límite en el mensaje.
+
+**Por qué solo `IN_PROGRESS`.** En un tablero de tres columnas, «trabajo en curso» es literalmente
+esa columna: `TODO` es la cola de entrada y `DONE` el archivo, y limitarlos no significaría nada.
+Un límite por columna arbitraria sería vocabulario kanban sin su semántica.
+
+**Por qué `NULL` y no `0` como «sin límite».** Un proyecto recién creado no debe nacer bloqueado.
+`0` es expresable pero absurdo de imponer, así que lo rechazan a la vez el esquema Zod y un `CHECK`
+del motor.
+
+**Por qué `FOR UPDATE` y no un `SELECT count(*)`.** Es la condición de carrera clásica de
+comprobar-y-actuar. Sin el bloqueo, dos peticiones simultáneas leen «0 en curso», las dos concluyen
+que cabe una más y las dos entran. **Se reprodujo:** al quitar el `FOR UPDATE`, la prueba de
+concurrencia falla con `expected [ 200, 200 ] to deeply equal [ 200, 409 ]` y el tablero queda con
+dos tareas en curso bajo un límite de una. El bloqueo serializa por proyecto, que es el recurso en
+disputa; bloquear las filas de `tasks` dejaría fuera justo a la que está entrando.
+
+**La tarea que ya está dentro no se cuenta dos veces.** Sin esa exclusión, corregir una errata en el
+título de una tarea en curso con el tablero lleno devolvería 409, y el límite pasaría de regla a
+trampa.
+
+**Alternativa descartada: imponerlo en el cliente.** Deshabilitar el botón cuando la columna está
+llena es más barato y no es una regla: dos pestañas abiertas, o cualquier cliente de la API, se la
+saltan. Una invariante de negocio que solo vive en React no es una invariante. El botón se deja
+habilitado a propósito y el servidor responde 409, que es la señal que el método quiere producir.
+
+**Consecuencia.** La cabecera de «En curso» muestra `1/2` y pasa a rojo al alcanzarse. Poner un
+límite por debajo del uso actual **no expulsa tareas**: muestra el exceso y bloquea las entradas
+nuevas, que es lo que hace un tablero real cuando un equipo aprieta su límite.
+
 ### ADR-005 (matiz) — Escribir la respuesta confirmada en la caché no es optimismo
 
 **Contexto.** Sin actualizaciones optimistas, cambiar el estado de una tarjeta dispara `PATCH` → invalidación → refetch, y la tarjeta se queda quieta durante ese viaje.
@@ -390,7 +428,7 @@ se retira la proyección y la tarjeta reaparece donde el servidor dice que está
 | Modales | elemento nativo `<dialog>` | — |
 | Arrastre | `@dnd-kit/core` (ADR-021) | 6.3.1 |
 | Pruebas | Vitest + Supertest | — |
-| E2E | Playwright (4 escenarios) | — |
+| E2E | Playwright (6 escenarios) | — |
 | CI | GitHub Actions | — |
 | Gates | `sistema-multiagente-sdlc` (`quality-gate`, `coverage-diff`) | 2.2.2 |
 | Gestor de paquetes | npm | 10.x |

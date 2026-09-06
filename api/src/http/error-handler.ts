@@ -22,6 +22,7 @@ const TITLES: Record<ErrorCode, string> = {
   TASK_NOT_FOUND: 'Tarea no encontrada',
   PROJECT_NAME_TAKEN: 'Nombre de proyecto en uso',
   PROJECT_HAS_TASKS: 'El proyecto tiene tareas asociadas',
+  WIP_LIMIT_REACHED: 'Límite de trabajo en curso alcanzado',
   ROUTE_NOT_FOUND: 'Ruta no encontrada',
   INTERNAL_ERROR: 'Error interno',
 };

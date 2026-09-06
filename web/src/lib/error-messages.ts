@@ -16,6 +16,11 @@ const MESSAGES: Record<string, string> = {
   // en el mensaje sería mandar al usuario a buscar un botón que no existe.
   PROJECT_HAS_TASKS:
     'Este proyecto todavía tiene tareas. Elimínalas antes de eliminar el proyecto.',
+  // `WIP_LIMIT_REACHED` no está aquí a propósito, y no es un olvido. Su
+  // `detail` incluye el límite concreto del proyecto —«el límite es de 3
+  // tareas»—, y un mensaje fijo escrito aquí solo podría decirlo en genérico o
+  // duplicar el cálculo. Es el caso que justifica que el respaldo a `detail`
+  // exista.
   PROJECT_NAME_TAKEN: 'Ya existe un proyecto con ese nombre.',
   PROJECT_NOT_FOUND: 'Este proyecto ya no existe.',
   TASK_NOT_FOUND: 'Esta tarea ya no existe.',

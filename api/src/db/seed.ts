@@ -21,6 +21,11 @@ const PROJECTS = [
     id: '5b1f0a10-0000-4000-8000-000000000001',
     name: 'Telepeaje — integración de operadores',
     description: 'Conexión con concesionarios viales y homologación de lectores TAG.',
+    // El único con límite de trabajo en curso, para que la regla se vea nada
+    // más abrir la aplicación (RF-16) y no solo si alguien la configura. Es 2
+    // y hay 1 tarea en curso: el contador muestra «1/2» sin estar bloqueado,
+    // así se ve el estado normal y basta mover una más para ver el 409.
+    wipLimit: 2,
   },
   {
     id: '5b1f0a10-0000-4000-8000-000000000002',
@@ -63,10 +68,10 @@ export async function runSeed(): Promise<{ projects: number; tasks: number }> {
     let projects = 0;
     for (const p of PROJECTS) {
       const res = await client.query(
-        `INSERT INTO projects (id, name, description)
-         VALUES ($1, $2, $3)
+        `INSERT INTO projects (id, name, description, wip_limit)
+         VALUES ($1, $2, $3, $4)
          ON CONFLICT (id) DO NOTHING`,
-        [p.id, p.name, p.description],
+        [p.id, p.name, p.description, 'wipLimit' in p ? p.wipLimit : null],
       );
       projects += res.rowCount ?? 0;
     }

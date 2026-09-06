@@ -30,6 +30,22 @@ Se interpreta explícitamente que:
 | RF-15 | Health check | MUST | `GET /api/health` devuelve 200 con estado de la conexión a PostgreSQL. Es lo que consume el `healthcheck` de Docker Compose. |
 | RF-16 | Datos de ejemplo cargados automáticamente | MUST | Tras `docker compose up`, la aplicación abre **con datos**, no en pantalla vacía. Seed idempotente. |
 
+### Más allá del enunciado
+
+Una sola capacidad entró sin estar pedida, y se declara como tal para que nadie la confunda con un
+requisito recibido:
+
+| | Capacidad | Por qué entró | Verificación |
+|---|---|---|---|
+| RF-17 | **Límite de trabajo en curso por proyecto** | Un tablero de tres columnas sin límite de WIP dibuja columnas pero no gestiona flujo. Es la idea central del método kanban y la única que se puede imponer de verdad con el modelo que ya existe. | `wipLimit` en el contrato; entrar en `IN_PROGRESS` por encima del límite devuelve **409 `WIP_LIMIT_REACHED`**; la regla se impone en una transacción con `FOR UPDATE`, y la prueba de concurrencia falla si se quita. Ver ADR-022. |
+
+Se evaluaron y **se descartaron** el resto del vocabulario kanban y scrum: carriles, definición de
+«Hecho» ejecutable, bloqueadores, tiempo de ciclo, diagrama de flujo acumulado, backlog con
+políticas de reposición y sprints. El caso que más enseña es **la edad de la tarjeta en su columna**:
+parecía la más barata y es imposible sin mentir, porque el esquema tiene `created_at`, `updated_at`
+y `completed_at` pero **no** `status_changed_at`; usar `updated_at` haría que corregir una errata
+reiniciara el contador.
+
 ### WON'T — descartado explícitamente
 
 No se implementa, y la razón se documenta:
@@ -41,7 +57,7 @@ No se implementa, y la razón se documenta:
 | ~~Drag & drop entre columnas~~ | **Entró después.** Se descartó dos veces —por coste, y por el conflicto medido con el carrusel— hasta que quedó claro que un retardo de activación separa el arrastre del desplazamiento. Está encima de las flechas, nunca en su lugar: WCAG 2.5.7 exige la alternativa de un solo puntero. Ver ADR-021. |
 | Soft delete / auditoría | No hay requisito de trazabilidad. Contamina toda consulta con `WHERE deleted_at IS NULL`. Se documenta cuándo sí se haría. |
 | Paginación | Con volumen de demostración añade complejidad sin señal. Se documenta el umbral a partir del cual sería obligatoria. |
-| Orden manual de tareas | Requiere índice flotante o lista enlazada y una API de reordenamiento. Fuera de alcance. |
+| Orden manual de tareas | Requiere índice flotante o lista enlazada y una API de reordenamiento. Fuera de alcance. El arrastre **no** promete lo contrario: la columna es el destino y el criterio de orden se anuncia bajo el tablero. Ver ADR-022 y `sl-11`. |
 | Asignados, comentarios, adjuntos | Cada uno es una entidad nueva. Son producto, no criterio de ingeniería. |
 | Actualizaciones optimistas | La invalidación de la query tras la mutación es suficiente y no puede mostrar un estado que la base rechazó. Consistencia antes que teatralidad. |
 | WebSockets, notificaciones, microservicios, Kubernetes | No resuelven ningún problema real de este dominio a este tamaño. |

@@ -17,6 +17,14 @@ export interface Project {
   id: string;
   name: string;
   description: string | null;
+  /**
+   * Máximo de tareas simultáneas en «En curso». `null` es «sin límite».
+   *
+   * Es la única regla del método kanban que el tablero impone: sin límite, un
+   * tablero solo dibuja columnas. Se aplica a `IN_PROGRESS` y a ninguna otra,
+   * porque en tres columnas «trabajo en curso» es literalmente esa.
+   */
+  wipLimit: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -24,6 +32,8 @@ export interface Project {
 export interface ProjectSummary extends Project {
   taskCount: number;
   doneCount: number;
+  /** Cuántas hay ahora mismo en curso. Es el numerador que muestra la columna. */
+  inProgressCount: number;
   /**
    * Cuántas tareas de cada prioridad tiene el proyecto. Las tres claves llegan
    * siempre, también en 0, así que el filtro del panel puede preguntar
@@ -49,11 +59,13 @@ export interface Task {
 export interface CreateProjectInput {
   name: string;
   description?: string | null;
+  wipLimit?: number | null;
 }
 
 export interface PatchProjectInput {
   name?: string;
   description?: string | null;
+  wipLimit?: number | null;
 }
 
 export interface Stats {
