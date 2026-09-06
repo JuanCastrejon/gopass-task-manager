@@ -1,6 +1,6 @@
 ### GoPass Task Manager — colección ejecutable de la API
 #
-# Trece endpoints. Se ejecuta desde VS Code con la extensión REST Client
+# Dieciocho endpoints. Se ejecuta desde VS Code con la extensión REST Client
 # (`humao.rest-client`) o desde JetBrains, pulsando «Send Request» sobre cada
 # bloque. Sirve además de guion: el orden de abajo recorre el ciclo completo,
 # incluidos los caminos de error.
@@ -357,6 +357,14 @@ Content-Type: application/json
 {
   "name": "Muy Urgente",
   "color": "orange"
+}
+
+### Renombrar etiqueta a un nombre ya existente en el proyecto → 409 LABEL_NAME_TAKEN
+PATCH {{host}}/labels/{{labelIdBackend}}
+Content-Type: application/json
+
+{
+  "name": "Muy Urgente"
 }
 
 ### Asignar etiquetas a una tarea (reemplazo atómico vía PUT idempotente)

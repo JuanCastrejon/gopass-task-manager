@@ -416,16 +416,142 @@ Código de salida: `0`. El nuevo valor queda disponible en el catálogo de tipos
 
 ---
 
-## 14. Qué cambió en la especificación por estas mediciones
+## 14. Mediciones del banco de pruebas de etiquetas (Normalizada vs Array `text[]` + GIN)
+
+Para fundamentar la decisión arquitectónica de SL-18 (ADR-029), se creó un banco de pruebas exhaustivo con **200 proyectos, 20 000 tareas y 40 000 asignaciones**, poblando exactamente las mismas relaciones en dos esquemas paralelos:
+1. **Esquema relacional normalizado:** tabla `labels` + tabla puente `task_labels` con claves foráneas compuestas.
+2. **Esquema desnormalizado:** columna `tasks.labels text[]` con índice GIN `USING gin (labels)`.
+
+Se ejecutó un protocolo de 1 000 iteraciones por consulta con caché caliente (`pg_stat_statements` y `EXPLAIN (ANALYZE, BUFFERS)`):
+
+| Consulta (caché caliente) | Normalizada | Array `text[]` + GIN |
+|---|---|---|
+| Listar un proyecto con sus etiquetas | 0,897 ms | 0,143 ms |
+| Filtrar por alguna de dos etiquetas | 0,779 ms | 1,032 ms |
+| Filtrar por todas | 0,582 ms | 0,531 ms |
+| **Renombrar una etiqueta en uso** | **0,346 ms** | 1,540 ms |
+
+### Por qué el rendimiento NO decidió
+El análisis de los planes de ejecución reveló que la diferencia en lectura es insignificante en la práctica:
+- El array gana el listado plano por solo 0,75 ms.
+- El array pierde el filtrado por alguna etiqueta por 0,25 ms.
+- A la escala real de un proyecto, el índice `tasks_project_id_idx` ya reduce el espacio de búsqueda a ~100 filas antes de que el índice GIN entre en juego. Por tanto, el índice GIN no introduce ninguna ventaja competitiva en lecturas acotadas por proyecto.
+
+Lo que decidió el diseño fueron la **integridad referencial categórica** y el **coste de renombrado**.
+
+---
+
+## 15. Comprobaciones empíricas de integridad en etiquetas
+
+Se verificaron contra el motor PostgreSQL 16 las dos garantías críticas del modelo normalizado frente a sus alternativas.
+
+### 1. Integridad referencial (Tabla puente vs Array)
+
+Al intentar asignar una etiqueta inexistente ("etiqueta fantasma"):
+
+**Enfoque desnormalizado con array `text[]`:**
+```sql
+UPDATE tasks
+   SET labels = array_append(labels, 'etiqueta fantasma')
+ WHERE id = 'b2c7e0a4-3f51-4a0e-8b2d-1c9f77aa0e31';
+```
+Salida literal del motor:
+```
+UPDATE 1
+```
+PostgreSQL acepta la escritura sin advertencia. La base queda en estado inconsistente con cadenas huérfanas que no corresponden a ninguna entidad real.
+
+**Enfoque normalizado con tabla puente `task_labels`:**
+```sql
+INSERT INTO task_labels (task_id, label_id, project_id)
+VALUES (
+  'b2c7e0a4-3f51-4a0e-8b2d-1c9f77aa0e31',
+  '00000000-0000-4000-8000-000000000000',
+  '8f14e45f-ceea-467a-9a1d-9e3f3f4a2b10'
+);
+```
+Salida literal del motor:
+```
+ERROR:  insert or update on table "task_labels" violates foreign key constraint "task_labels_label_fkey"
+DETAIL:  Key (label_id, project_id)=(00000000-0000-4000-8000-000000000000, 8f14e45f-ceea-467a-9a1d-9e3f3f4a2b10) is not present in table "labels".
+SQLSTATE: 23503
+```
+La clave foránea rechaza categóricamente la inserción en el motor.
+
+### 2. Clave foránea compuesta contra asignación cruzada entre proyectos
+
+Se comprobó la protección contra asignaciones multidominio: intentar vincular una tarea del proyecto A (id `77..`) con una etiqueta perteneciente al proyecto B (id `03..`).
+
+**Sin clave foránea compuesta (tabla puente simple `task_id, label_id`):**
+```sql
+INSERT INTO task_labels_simple (task_id, label_id)
+VALUES (
+  '77777777-7777-4777-8777-777777777777',
+  '03030303-0303-4303-8303-030303030303'
+);
+```
+Salida literal del motor:
+```
+INSERT 0 1
+```
+La tabla puente simple acepta que una tarea muestre etiquetas pertenecientes a otro proyecto ajeno.
+
+**Con clave foránea compuesta `(label_id, project_id) REFERENCES labels(id, project_id)`:**
+```sql
+INSERT INTO task_labels (task_id, label_id, project_id)
+VALUES (
+  '77777777-7777-4777-8777-777777777777',
+  '03030303-0303-4303-8303-030303030303',
+  '77777777-7777-4777-8777-777777777777'
+);
+```
+Salida literal del motor:
+```
+ERROR:  insert or update on table "task_labels" violates foreign key constraint "task_labels_label_fkey"
+DETAIL:  Key (label_id, project_id)=(03030303-0303-4303-8303-030303030303, 77777777-7777-4777-8777-777777777777) is not present in table "labels".
+SQLSTATE: 23503
+```
+El motor impide físicamente la corrupción de datos entre proyectos, reproduciendo el patrón de `(column_id, status) → project_columns (id, category)` de la migración `0004`.
+
+---
+
+## 16. Rendimiento de hidratación: Consulta única vs Dos consultas
+
+Se midió el coste de cargar las tareas de un tablero con sus correspondientes etiquetas:
+
+| Enfoque | Consulta | Tiempo medio |
+|---|---|---|
+| Una consulta con agregación | `LEFT JOIN task_labels` + `LEFT JOIN labels` + `jsonb_agg` + `GROUP BY` | 1,429 ms |
+| Dos consultas independientes | `LIST_QUERY` intacta + `WHERE task_id = ANY($1::uuid[])` | **0,867 ms** |
+
+### Análisis arquitectónico
+Más allá del ahorro de ~0,56 ms, las dos consultas aportan ventajas estructurales:
+1. **Preservación de `LIST_QUERY`:** la escalera de `CASE pc.sort` de ADR-024 no se altera ni se envuelve en subconsultas complejas.
+2. **Eliminación del producto cartesiano:** unir `tasks` con `task_labels` en una consulta plana multiplicaría las filas antes del `GROUP BY`, aumentando el consumo de buffers y memoria de ordenación (`work_mem`).
+3. **Salvedad honesta de latencia:** Dos consultas implican dos viajes de red (round trips). En la arquitectura de producción sobre Docker Compose la latencia local es de ~0,1 ms. Si en el futuro PostgreSQL se alojara en un servicio gestionado remoto con latencia de red superior a 10 ms por viaje, esta decisión debería re-evaluarse.
+
+### Preservación de la fila fantasma en el filtro
+Al filtrar por etiquetas, la condición se sitúa en la cláusula `ON` del `LEFT JOIN`:
+```sql
+AND ($5::uuid[] IS NULL OR EXISTS (
+  SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = ANY($5)
+))
+```
+Verificado contra PostgreSQL 16: cuando un proyecto existe pero ninguna de sus tareas cumple el filtro de etiquetas, la consulta devuelve `1 fila con project_exists = id y t.id = NULL`. Si se hubiera ubicado en el `WHERE`, la consulta devolvería `0 filas`, provocando que el repositorio confunda «sin tareas que coincidan» con «proyecto inexistente» y responda un falso `404 PROJECT_NOT_FOUND`.
+
+---
+
+## 17. Qué cambió en la especificación por estas mediciones
 
 | Documento | Cambio |
 |---|---|
-| `02-modelo-dominio.md` | Se documentaron `tasks.position` (restricción única y trigger) y `tasks.due_date` como tipo `date` civil puro. |
-| `03-contrato-api.md` | Se documentaron `PATCH /tasks/:id/reorder`, ciclo de vida de `dueDate` (crear, editar, listar) y orden `due_asc`. |
-| `04-arquitectura.md` | Se añadieron ADR-025, ADR-026, ADR-027 (completar de un clic) y ADR-028 (due_date en date y semáforo en cliente). |
-| `05-estrategia-calidad.md` | Recuentos actualizados: 123 API, 42 Web, 14 E2E (179 pruebas totales). |
-| `08-verificacion-postgres.md` | Mediciones de precisión (§9), error 55P04 (§10), desfase de husos (§11), parser OID 1082 (§12) y migración 0008 (§13). |
+| `02-modelo-dominio.md` | Se documentaron `tasks.position`, `tasks.due_date`, tabla `labels` con paleta de 12 colores, tabla puente `task_labels` con FK compuestas y borrado `CASCADE` desde proyecto (ADR-030). |
+| `03-contrato-api.md` | Se documentaron `PATCH /tasks/:id/reorder`, ciclo de vida de `dueDate`, endpoints de `labels` (CRUD + `PUT /tasks/:id/labels`), filtro `labels` en `GET /tasks` y nuevos códigos de error (`LABEL_NAME_TAKEN`, `LABEL_HAS_TASKS`, `LABEL_NOT_FOUND`). |
+| `04-arquitectura.md` | Se añadieron ADR-025, ADR-026, ADR-027, ADR-028, ADR-029 (etiquetas normalizadas con clave compuesta) y ADR-030 (etiquetas como configuración con cascada). |
+| `05-estrategia-calidad.md` | Recuentos actualizados: 137 API, 52 Web, 15 E2E (204 pruebas totales). |
+| `08-verificacion-postgres.md` | Mediciones de precisión (§9), error 55P04 (§10), desfase de husos (§11), parser OID 1082 (§12), migración 0008 (§13), banco de pruebas de etiquetas (§14), comprobaciones de integridad con salidas literales (§15) e hidratación en dos consultas (§16). |
 | `api/src/db/pool.ts` | Parser de identidad para OID 1082 con advertencia de alcance global a todo el proceso Node.js. |
 | `api/docker-entrypoint.sh` y `package.json` | Se configuró `--no-single-transaction` en `node-pg-migrate`. |
+
 
 

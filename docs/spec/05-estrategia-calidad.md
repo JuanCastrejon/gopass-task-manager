@@ -12,10 +12,10 @@ El reparto no es doctrinal, es de retorno por hora dentro de un plazo de 20 hora
 
 | Tipo | Peso | Por qué |
 |---|---|---|
-| **Integración de API contra PostgreSQL real** | ~65 % | **123 pruebas**. Una sola prueba de `POST /projects → POST /tasks → PATCH status → GET` ejercita middleware, Zod, ruta, repositorio, SQL parametrizado y las restricciones reales del motor. Ningún otro tipo de prueba cubre tanto por línea escrita. |
+| **Integración de API contra PostgreSQL real** | ~65 % | **137 pruebas** (125 integración + 12 unitarias de `pg-error`). Una sola prueba de `POST /projects → POST /tasks → PATCH status → GET` ejercita middleware, Zod, ruta, repositorio, SQL parametrizado y las restricciones reales del motor. Ningún otro tipo de prueba cubre tanto por línea escrita. |
 | **Unitarias de lógica no trivial** | ~15 % | Solo el mapeo `SQLSTATE`→HTTP, el cálculo de avance, la regla de `completed_at` y el semáforo puro de vencimiento. No se prueban getters ni se simula `pg`: simular el driver prueba el simulador. |
-| **Componentes de React y frontend** | ~10 % | **42 pruebas**. Los estados vacío, cargando y error de la vista de proyecto, con la API simulada a nivel de `fetch`, pruebas de filtros, tablero, 5 pruebas de completar tarea de un clic (SL-16) y 14 pruebas unitarias de fechas de vencimiento (SL-17). |
-| **E2E con Playwright** | ~10 % | **14 escenarios**. Desde el ciclo completo y conflicto de borrado hasta columnas configurables, límites de WIP, arrastre entre columnas, reordenación manual (SL-15), completar de un clic (SL-16) y fecha de vencimiento con semáforo (SL-17). |
+| **Componentes de React y frontend** | ~10 % | **52 pruebas**. Los estados vacío, cargando y error de la vista de proyecto, con la API simulada a nivel de `fetch`, pruebas de filtros, tablero, 5 pruebas de completar tarea de un clic (SL-16), 14 pruebas unitarias de fechas de vencimiento (SL-17) y 10 pruebas de gestión y asignación de etiquetas (SL-18). |
+| **E2E con Playwright** | ~10 % | **15 escenarios**. Desde el ciclo completo y conflicto de borrado hasta columnas configurables, límites de WIP, arrastre entre columnas, reordenación manual (SL-15), completar de un clic (SL-16), fecha de vencimiento con semáforo (SL-17) y etiquetas de color (SL-18). |
 
 ### Aislamiento: una base por worker de Vitest
 
@@ -81,7 +81,8 @@ Un requisito sin prueba no se considera entregado. Esta tabla se completa durant
 | Arrastre | `TaskCard` + `TaskBoard` (ADR-021) | E2E escenario 3: mover entre columnas y persistir · escenario 4: soltar fuera devuelve la tarjeta y no dispara petición |
 | Orden manual (SL-15) | `TaskBoard` + `reorderTask` (ADR-025) | ✅ `tests/integration/tasks.test.ts` (reordenación, cálculo fraccionario, 60 inserciones en el mismo hueco, convivencia con ADR-024) · E2E escenarios 13 y 14 (`orden-manual-de-tareas.spec.ts`: persistencia tras recarga y bloqueo con aviso visible en columnas automáticas) |
 | Completar de un clic (SL-16) | `TaskCard` + `TaskBoard` (ADR-027) | ✅ 5 pruebas en `web/src/features/tasks/__tests__/completar-tarea.test.tsx` (clic directo, menú con varios destinos, rechazo del antipatrón de Kaneo, indicador de estado en completadas y teclado accesible) · E2E escenarios 8 y 9 (`completar-de-un-clic.spec.ts`: completado directo y con múltiples columnas DONE) |
-| Fecha de vencimiento (SL-17) | `tasks.due_date` · `DueDateBadge` (ADR-028) | ✅ API: 5 pruebas en `tests/integration/tasks.test.ts` (CRUD con dueDate, validación en español, orden `due_asc` con nulls last, protección de ADR-024 e ida y vuelta sin desfase horario) · Web: 14 pruebas puras en `web/src/features/tasks/__tests__/due-date.test.ts` · E2E escenario 11 (`fecha-de-vencimiento.spec.ts`) |
+| Fecha de vencimiento (SL-17) | `tasks.due_date` · `DueDateBadge` (ADR-028) | ✅ API: 5 pruebas en `tests/integration/tasks.test.ts` (CRUD con dueDate, validación en español, orden `due_asc` con nulls last, protección de ADR-024 e ida y vuelta sin desfase horario) · Web: 14 pruebas puras en `web/src/features/tasks/__tests__/due-date.test.ts` · E2E escenario 12 (`fecha-de-vencimiento.spec.ts`) |
+| Etiquetas de color (SL-18) | `labels` · `task_labels` · `LabelManagerDialog` · `Badge` (ADR-029, ADR-030) | ✅ API: 12 pruebas en `tests/integration/labels.test.ts` (CRUD, validaciones, 409 por nombre repetido, 409 por borrado sin confirmación, integridad compuesta multidominio y reemplazo PUT atómico), 1 prueba de regresión en `tests/integration/projects.test.ts` (borrado de proyecto con etiquetas y sin tareas es 204 y no 500) · Web: 3 pruebas en `web/src/features/labels/__tests__/Badge.test.tsx`, 5 pruebas en `web/src/features/labels/__tests__/LabelManagerDialog.test.tsx`, 2 pruebas en `web/src/features/tasks/__tests__/TaskFormDialogLabels.test.tsx` · E2E escenario 11 (`e2e/etiquetas.spec.ts`: creación, asignación, visualización en tarjeta, filtrado en URL y persistencia tras recarga) |
 | RF-12 | `GET /api/stats` · `StatsPanel` | ✅ `tests/integration/stats.test.ts` → sin datos devuelve ceros con todas las claves presentes, agregados correctos, reparto por estado y prioridad, números y no los `bigint` como string |
 | RF-13 | filtros en `GET .../tasks` | ✅ **entró en SL-05** → estado y prioridad repetibles, combinación de ambos, `q` con `ILIKE` insensible a mayúsculas, valores repetidos deduplicados, sin coincidencias → `[]` y no 404, valor fuera del enum → 400, filtro vacío → 400 |
 | RF-15 | `GET /api/health` | integración: 200 y campo de estado de la base |
@@ -187,7 +188,7 @@ typecheck     →  tsc --noEmit  (api y web)
 test:api      →  vitest run --coverage  contra el servicio postgres:16 en 5433
 test:web      →  vitest run
 build         →  tsc + vite build
-e2e           →  playwright test  (chromium, 11 escenarios, bloqueante)
+e2e           →  playwright test  (chromium, 15 escenarios, bloqueante)
 quality-gate  →  sdlc quality-gate --slice ci --phase F8 --run --json
 ```
 

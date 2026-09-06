@@ -167,8 +167,18 @@ Un solo endpoint agregado en lugar de que el frontend descargue todo y cuente en
 | `status` | `TODO` \| `IN_PROGRESS` \| `DONE` | Repetible. `?status=TODO&status=IN_PROGRESS` |
 | `priority` | `LOW` \| `MEDIUM` \| `HIGH` | Repetible |
 | `q` | texto libre | `ILIKE` sobre `title`, con el patrón parametrizado |
+| `labels` | UUID | Repetible. `?labels=<uuid>&labels=<uuid>`. Filtra tareas con alguna de las etiquetas indicadas |
 
-Los filtros se traducen a `WHERE` en la consulta. Un valor fuera del enum devuelve 400 con el detalle del campo, no lo ignora en silencio: ignorar un filtro inválido devuelve resultados que el cliente cree filtrados.
+Los filtros se traducen a la condición del `LEFT JOIN` en la consulta. Un valor fuera del enum o un UUID mal formado devuelve 400 con el detalle del campo, no lo ignora en silencio: ignorar un filtro inválido devuelve resultados que el cliente cree filtrados.
+
+**El filtro de etiquetas se ubica en el `LEFT JOIN`, nunca en el `WHERE`:**
+Se implementa mediante:
+```sql
+AND ($5::uuid[] IS NULL OR EXISTS (
+  SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = ANY($5)
+))
+```
+Si se ubicara en el `WHERE`, un filtro de etiquetas que no coincida con ninguna tarea descartaría también la fila del proyecto, haciendo que un proyecto válido responda un falso `404 PROJECT_NOT_FOUND` en lugar de una lista vacía `[]` con `200 OK` (ADR-016).
 
 Contrato de casos borde del filtro, definido explícitamente para que no lo decida el azar:
 
@@ -178,7 +188,8 @@ Contrato de casos borde del filtro, definido explícitamente para que no lo deci
 | `?status=` (vacío) | 400 `VALIDATION_ERROR`. Un filtro vacío es un error del cliente, no "todos" |
 | `?status=TODO&status=TODO` | Se deduplica antes de la consulta |
 | `?status=BANANA` | 400 `VALIDATION_ERROR`, rechazado por Zod **antes** de llegar a PostgreSQL |
-| Orden de los resultados | Siempre `ORDER BY priority DESC, created_at DESC, id` — el `id` final garantiza orden estable entre ejecuciones |
+| `?labels=no-uuid` | 400 `VALIDATION_ERROR`, formato UUID inválido |
+| Orden de los resultados | Escalera de `CASE pc.sort`, con desempate estable final `created_at DESC, id` |
 
 La forma de la consulta está verificada contra PostgreSQL 16 con el driver `pg`:
 
@@ -230,8 +241,12 @@ Errores de validación añaden desglose por campo:
 | `VALIDATION_ERROR` | 400 | Zod rechaza el body, la query o el parámetro de ruta |
 | `PROJECT_NOT_FOUND` | 404 | El proyecto no existe |
 | `TASK_NOT_FOUND` | 404 | La tarea no existe |
+| `LABEL_NOT_FOUND` | 404 | La etiqueta no existe |
 | `PROJECT_NAME_TAKEN` | 409 | Ya existe un proyecto con ese nombre (ignorando mayúsculas y espacios) |
+| `LABEL_NAME_TAKEN` | 409 | Ya existe una etiqueta con ese nombre en el proyecto (ignorando mayúsculas y espacios) |
 | `PROJECT_HAS_TASKS` | 409 | Se intenta eliminar un proyecto con tareas |
+| `LABEL_HAS_TASKS` | 409 | Se intenta eliminar una etiqueta asignada a tareas sin confirmación (`?confirm=true`) |
+| `WIP_LIMIT_REACHED` | 409 | La columna destino ha alcanzado su límite de trabajo en curso |
 | `ROUTE_NOT_FOUND` | 404 | La ruta no existe. Se devuelve en el mismo formato que el resto, no como el HTML por defecto de Express |
 | `INTERNAL_ERROR` | 500 | Cualquier cosa no prevista. Sin `detail`, sin stack trace; con `requestId` para correlacionar con el log |
 
@@ -243,10 +258,13 @@ Esta tabla es el corazón del middleware de errores. Existe porque **la integrid
 
 | `SQLSTATE` | Nombre | Situación | Respuesta |
 |---|---|---|---|
-| `23503` | `foreign_key_violation` | `DELETE` de proyecto con tareas | 409 `PROJECT_HAS_TASKS` |
+| `23503` | `foreign_key_violation` | `DELETE` de proyecto con tareas (`tasks_project_id_fkey`) | 409 `PROJECT_HAS_TASKS` |
 | `23503` | `foreign_key_violation` | `INSERT` de tarea con `project_id` inexistente | 404 `PROJECT_NOT_FOUND` |
-| `23505` | `unique_violation` | Nombre de proyecto repetido | 409 `PROJECT_NAME_TAKEN` |
-| `23514` | `check_violation` | Nombre en blanco, título en blanco, invariante de `completed_at` | 400 `VALIDATION_ERROR` |
+| `23503` | `foreign_key_violation` | Asignación de etiqueta de otro proyecto (`task_labels_label_fkey`) | 400 `VALIDATION_ERROR` |
+| `23505` | `unique_violation` | Nombre de proyecto repetido (`projects_name_unique_ci`) | 409 `PROJECT_NAME_TAKEN` |
+| `23505` | `unique_violation` | Nombre de etiqueta repetido (`labels_project_name_unique_ci`) | 409 `LABEL_NAME_TAKEN` |
+| `23505` | `unique_violation` | Posición manual duplicada (`tasks_position_unica`) | rebalanceo automático transparente |
+| `23514` | `check_violation` | Nombre en blanco, color fuera de paleta, invariante de `completed_at` | 400 `VALIDATION_ERROR` |
 | `22P02` | `invalid_text_representation` | UUID mal formado o valor fuera del `ENUM` | 400 `VALIDATION_ERROR` |
 | `23502` | `not_null_violation` | Campo obligatorio ausente | 400 `VALIDATION_ERROR` |
 | resto | — | — | 500 `INTERNAL_ERROR`, registrado con `requestId` |
