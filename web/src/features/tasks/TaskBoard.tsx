@@ -319,8 +319,8 @@ export function TaskBoard({
         {/* El criterio de orden se dice en voz alta. Sin esto, una tarjeta que
             aparece dos posiciones más abajo de donde se soltó parece un fallo;
             con esto es una regla que el usuario puede predecir. */}
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold">Tareas</h2>
+        <div className="min-w-0 rounded-lg border border-border bg-surface px-3 py-1.5 shadow-xs">
+          <h2 className="text-sm font-semibold text-ink">Tareas</h2>
           <p className="text-xs text-ink-muted">
             Arrastra para mover entre columnas o reordena dentro de columnas con orden manual
           </p>

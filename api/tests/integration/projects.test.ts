@@ -73,6 +73,32 @@ describe('POST /api/projects', () => {
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('PROJECT_NAME_TAKEN');
   });
+
+  it("asigna fondo 'neutro' por defecto si no se especifica", async () => {
+    const res = await request(app).post('/api/projects').send({ name: 'Fondo defecto' });
+    expect(res.status).toBe(201);
+    expect(res.body.background).toBe('neutro');
+  });
+
+  it('crea el proyecto con un fondo de la paleta cerrada', async () => {
+    const res = await request(app)
+      .post('/api/projects')
+      .send({ name: 'Fondo azul', background: 'azul' });
+    expect(res.status).toBe(201);
+    expect(res.body.background).toBe('azul');
+  });
+
+  it('rechaza un fondo no perteneciente a la paleta con 400 y mensaje en español', async () => {
+    const res = await request(app)
+      .post('/api/projects')
+      .send({ name: 'Invalido', background: 'fosforito' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+    expect(res.body.errors?.[0]?.path).toBe('background');
+    expect(res.body.errors?.[0]?.message).toContain(
+      'El fondo debe ser uno de: neutro, azul, verde, ambar, purpura, rosa.',
+    );
+  });
 });
 
 describe('GET /api/projects', () => {
@@ -232,6 +258,47 @@ describe('PATCH /api/projects/:id', () => {
 
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('PROJECT_NAME_TAKEN');
+  });
+
+  it('actualiza el fondo del proyecto a otro valor de la paleta', async () => {
+    const { body: creado } = await crearProyecto();
+    const res = await request(app)
+      .patch(`/api/projects/${creado.id}`)
+      .send({ background: 'verde' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.background).toBe('verde');
+
+    const detalle = await request(app).get(`/api/projects/${creado.id}`);
+    expect(detalle.body.background).toBe('verde');
+  });
+
+  it('rechaza actualizar el fondo con un valor fuera de la paleta con 400', async () => {
+    const { body: creado } = await crearProyecto();
+    const res = await request(app)
+      .patch(`/api/projects/${creado.id}`)
+      .send({ background: 'magenta' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+    expect(res.body.errors?.[0]?.path).toBe('background');
+    expect(res.body.errors?.[0]?.message).toContain(
+      'El fondo debe ser uno de: neutro, azul, verde, ambar, purpura, rosa.',
+    );
+  });
+});
+
+describe('CHECK projects_background_check (SL-19 paso 3)', () => {
+  it('el CHECK del motor rechaza un UPDATE directo con un fondo fuera de la paleta', async () => {
+    const { body: creado } = await crearProyecto();
+    const { pool } = await import('../../src/db/pool.js');
+
+    await expect(
+      pool.query('UPDATE projects SET background = $1 WHERE id = $2', [
+        'radiactivo',
+        creado.id,
+      ]),
+    ).rejects.toThrow(/projects_background_check/);
   });
 });
 

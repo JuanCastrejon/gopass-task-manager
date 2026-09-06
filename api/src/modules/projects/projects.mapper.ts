@@ -4,11 +4,13 @@
  */
 
 import type { TaskPriority } from '../tasks/tasks.schema.js';
+import type { ProjectBackground } from './projects.schema.js';
 
 export interface ProjectRow {
   id: string;
   name: string;
   description: string | null;
+  background: ProjectBackground;
   created_at: Date;
   updated_at: Date;
 }
@@ -26,6 +28,7 @@ export interface Project {
   id: string;
   name: string;
   description: string | null;
+  background: ProjectBackground;
   createdAt: string;
   updatedAt: string;
 }
@@ -51,6 +54,7 @@ export function toProject(row: ProjectRow): Project {
     id: row.id,
     name: row.name,
     description: row.description,
+    background: row.background,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };

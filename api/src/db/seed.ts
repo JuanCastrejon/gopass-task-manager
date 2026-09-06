@@ -21,23 +21,27 @@ const PROJECTS = [
     id: '5b1f0a10-0000-4000-8000-000000000001',
     name: 'Telepeaje — integración de operadores',
     description: 'Conexión con concesionarios viales y homologación de lectores TAG.',
+    background: 'azul',
   },
   {
     id: '5b1f0a10-0000-4000-8000-000000000002',
     name: 'App de parqueaderos — flujo de pago',
     description: 'Entrada, salida y liquidación de tarifa desde la aplicación móvil.',
+    background: 'verde',
   },
   {
     id: '5b1f0a10-0000-4000-8000-000000000003',
     name: 'Conciliación de transacciones',
     description: 'Cuadre diario entre recaudo, pasarela y extracto bancario.',
+    background: 'ambar',
   },
   {
     // Sin tareas a propósito: es el proyecto que demuestra el estado vacío
-    // y el `progress: 0` de RF-02.
+    // y el `progress: 0` de RF-02. Conserva fondo neutro por defecto.
     id: '5b1f0a10-0000-4000-8000-000000000004',
     name: 'Migración de facturación electrónica',
     description: 'Aún sin planificar. Sirve para ver el estado vacío de la aplicación.',
+    background: 'neutro',
   },
 ] as const;
 
@@ -97,10 +101,10 @@ export async function runSeed(): Promise<{ projects: number; tasks: number }> {
     let projects = 0;
     for (const p of PROJECTS) {
       const res = await client.query(
-        `INSERT INTO projects (id, name, description)
-         VALUES ($1, $2, $3)
+        `INSERT INTO projects (id, name, description, background)
+         VALUES ($1, $2, $3, $4)
          ON CONFLICT (id) DO NOTHING`,
-        [p.id, p.name, p.description],
+        [p.id, p.name, p.description, p.background],
       );
       projects += res.rowCount ?? 0;
     }

@@ -23,6 +23,7 @@ const proyecto = (
   id: crypto.randomUUID(),
   name,
   description: null,
+  background: 'neutro',
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
   taskCount: byPriority.LOW + byPriority.MEDIUM + byPriority.HIGH,

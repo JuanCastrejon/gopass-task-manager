@@ -136,10 +136,44 @@ export interface PatchColumnInput {
   sort?: ColumnSort;
 }
 
+/**
+ * Seis fondos semánticos para el tablero del proyecto (SL-19 paso 3).
+ * Paleta cerrada: neutro (defecto) y cinco degradados suaves.
+ */
+export const PROJECT_BACKGROUNDS = [
+  'neutro',
+  'azul',
+  'verde',
+  'ambar',
+  'purpura',
+  'rosa',
+] as const;
+
+export type ProjectBackground = (typeof PROJECT_BACKGROUNDS)[number];
+
+export const PROJECT_BACKGROUND_NAMES: Record<ProjectBackground, string> = {
+  neutro: 'Neutro',
+  azul: 'Azul',
+  verde: 'Verde',
+  ambar: 'Ámbar',
+  purpura: 'Púrpura',
+  rosa: 'Rosa',
+};
+
+export const BOARD_BACKGROUND_CLASSES: Record<ProjectBackground, string> = {
+  neutro: 'bg-board-neutro',
+  azul: 'bg-board-azul',
+  verde: 'bg-board-verde',
+  ambar: 'bg-board-ambar',
+  purpura: 'bg-board-purpura',
+  rosa: 'bg-board-rosa',
+};
+
 export interface Project {
   id: string;
   name: string;
   description: string | null;
+  background: ProjectBackground;
   createdAt: string;
   updatedAt: string;
 }
@@ -180,11 +214,13 @@ export interface Task {
 export interface CreateProjectInput {
   name: string;
   description?: string | null;
+  background?: ProjectBackground;
 }
 
 export interface PatchProjectInput {
   name?: string;
   description?: string | null;
+  background?: ProjectBackground;
 }
 
 export interface Stats {
