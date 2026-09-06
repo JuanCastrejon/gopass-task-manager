@@ -32,4 +32,8 @@
 - [x] 5.3 Sin inestabilidad: 10 de 10 con `--repeat-each=5`
 - [x] 5.4 Medido que mantener 300 ms activa el arrastre y deslizar 60 ms no
 - [x] 5.5 ADR-021 escrito, y notas de revisión en ADR-018 y ADR-020
-- [ ] 5.6 Comprobación manual en iOS Safari y Chrome Android sobre dispositivo físico
+- [x] 5.6 Comprobación manual en iOS Safari y Chrome Android sobre dispositivo físico
+      — validada por Juan el 2026-09-06 sobre un móvil real: el arrastre táctil
+      funciona sin incidencias. Era la única tarea que no podía cerrarse desde
+      el entorno de desarrollo, porque un emulador no reproduce el
+      comportamiento del gesto ni la latencia del sensor táctil.
