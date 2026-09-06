@@ -15,6 +15,16 @@ Un solo requisito: Docker. Levanta la base, aplica migraciones y siembra datos d
 
 El navegador consume la API por la ruta relativa `/api` sobre ese mismo origen, así que no hace falta configurar CORS ni conocer un segundo puerto. La API también se publica en <http://localhost:3000> para atacarla directamente con `curl` o Postman; es una puerta de diagnóstico, no la de uso normal.
 
+**O sin instalar nada, en producción:**
+
+| | |
+|---|---|
+| **Aplicación** | <https://gopass-task-manager-web.vercel.app> |
+| **API** | <https://gopass-task-manager-api.vercel.app> |
+| **Swagger UI** | <https://gopass-task-manager-api.vercel.app/docs> |
+
+Web y API son dos proyectos independientes en Vercel, no un empaquetado conjunto. El navegador sigue pidiendo a `/api` —la misma ruta relativa que en local—, y un *rewrite* declarado en `web/vercel.json` la reenvía a la API. El bundle de Vite no lleva dentro ninguna URL de producción y no hay CORS que configurar en ningún ambiente. La base es PostgreSQL en Supabase, alcanzada por su pooler transaccional.
+
 **Si alguno de esos puertos está ocupado**, se cambian sin tocar código: `WEB_PORT`, `API_PORT` y `POSTGRES_PORT` en `.env`. Dentro de la red de Docker los servicios siguen hablando por sus puertos nativos, así que solo cambia lo que se publica en el host.
 
 ```bash
@@ -33,10 +43,20 @@ Crear proyectos, asociarles tareas con estado y prioridad, y ver el trabajo de f
 |---|---|
 | **Panel** | Totales, avance global y reparto de tareas por estado, agregados en la base de un solo viaje |
 | **Proyectos** | Alta, edición y borrado, con barra de avance calculada en SQL |
-| **Tablero** | Tres columnas por estado, con transición en un clic, búsqueda y filtro por prioridad |
+| **Tablero** | Columnas **configurables por proyecto**: crear, renombrar desde su propia cabecera, reordenar y borrar reasignando lo que contienen |
+| **Límite de trabajo en curso** | Opcional y por columna, no por proyecto: «Desarrollo máximo 3» y «QA máximo 2» son políticas distintas y coexisten |
+| **Orden de las tarjetas** | Por columna, entre cinco criterios o manual arrastrando, con posición fraccionaria para no reescribir la columna entera |
+| **Tarjetas** | Fecha de vencimiento con semáforo temporal, etiquetas de color y completado en un clic |
 | **Filtros** | Viven en la URL: un tablero filtrado se comparte por enlace y sobrevive a una recarga |
+| **Aspecto** | Tema claro y oscuro con contraste verificado, y fondo de tablero elegible por proyecto |
 
 ![Tablero de tareas](docs/assets/tablero.png)
+
+## Vídeo de demostración
+
+**[docs/assets/demo.mp4](docs/assets/demo.mp4)** — 2 min 52 s, con locución. Añadir una columna y renombrarla desde su cabecera, ponerle un límite de trabajo en curso y agotarlo hasta que el tablero rechaza la tercera tarjeta, el contrato publicado en Swagger, y el conflicto que devuelve la base al intentar borrar un proyecto que todavía tiene tareas.
+
+Está dentro del repositorio a propósito: la entrega no depende de ningún servicio externo que pueda caducar o cambiar de permisos. GitHub no reproduce en línea un MP4 enlazado desde el README, así que el enlace lo abre o lo descarga.
 
 ## Cinco decisiones que definen este proyecto
 
@@ -55,7 +75,7 @@ Un `CHECK` verifica la invariante `DONE ⟺ completed_at IS NOT NULL` y un trigg
 **5. Sin ORM y sin librería de enrutado.**
 Dos entidades no justifican una abstracción que oculta el control granular del SQL y los planes de ejecución; el patrón repositorio da el mismo aislamiento. Para el enrutado se midió el coste real de `react-router-dom` en este bundle —**+13.4 KB gzip para dos rutas**— y se resolvió con la History API.
 
-El registro completo son **30 ADRs** en [docs/spec/04-arquitectura.md](docs/spec/04-arquitectura.md), cada uno con su contexto, sus alternativas descartadas y por qué.
+El registro completo son **35 ADRs** en [docs/spec/04-arquitectura.md](docs/spec/04-arquitectura.md), cada uno con su contexto, sus alternativas descartadas y por qué.
 
 ## Arquitectura
 
@@ -75,11 +95,11 @@ PostgreSQL 16
 
 Las tres capas validan cosas distintas: el formulario, para no molestar al servidor con datos incompletos; la API, porque el frontend se puede saltar con `curl`; y la base, porque la API puede tener un fallo.
 
-Monolito modular con módulos por dominio (`projects`, `tasks`, `stats`).
+Monolito modular con módulos por dominio (`projects`, `columns`, `tasks`, `labels`, `stats`).
 
 ## API
 
-Dieciocho endpoints. Errores en `application/problem+json` (RFC 7807) con un `code` estable que el frontend traduce; `X-Request-Id` en **todas** las respuestas, no solo en los fallos.
+Veintitrés endpoints. Errores en `application/problem+json` (RFC 7807) con un `code` estable que el frontend traduce; `X-Request-Id` en **todas** las respuestas, no solo en los fallos.
 
 | | Ruta | |
 |---|---|---|
@@ -87,8 +107,12 @@ Dieciocho endpoints. Errores en `application/problem+json` (RFC 7807) con un `co
 | `GET` | `/api/stats` | Agregados del panel |
 | `GET · POST` | `/api/projects` | Listar con avance · crear |
 | `GET · PATCH · DELETE` | `/api/projects/:id` | Detalle · edición parcial · borrado (**409** si tiene tareas) |
+| `GET · POST` | `/api/projects/:id/columns` | Listar columnas del tablero · crear columna |
+| `PATCH` | `/api/projects/:id/columns/reorder` | Reordenar el conjunto en una transacción, no columna a columna |
+| `PATCH · DELETE` | `/api/projects/:id/columns/:columnId` | Nombre, límite y criterio de orden · borrado (**409** si tiene tareas y no se indica `?reassignTo`) |
 | `GET · POST` | `/api/projects/:id/tasks` | Listar con filtros · crear |
-| `GET · PATCH · DELETE` | `/api/tasks/:id` | Detalle · edición parcial · borrado · reordenación manual (`/reorder`) |
+| `GET · PATCH · DELETE` | `/api/tasks/:id` | Detalle · edición parcial · borrado |
+| `PATCH` | `/api/tasks/:id/reorder` | Posición manual dentro de la columna |
 | `GET · POST` | `/api/projects/:id/labels` | Listar etiquetas del proyecto · crear etiqueta |
 | `PATCH · DELETE` | `/api/labels/:id` | Edición de etiqueta · borrado (`?confirm=true` si tiene tareas) |
 | `PUT` | `/api/tasks/:id/labels` | Reemplazo atómico de etiquetas de la tarea |
@@ -98,20 +122,22 @@ Dieciocho endpoints. Errores en `application/problem+json` (RFC 7807) con un `co
 ## Calidad
 
 ```
-204 pruebas    137 backend (integración contra PostgreSQL real) · 52 frontend · 15 E2E
-96.94 %       cobertura de líneas del backend funcional
+258 pruebas    149 backend (integración contra PostgreSQL real) · 85 frontend · 24 E2E
+96.67 %       cobertura de líneas del backend funcional
 ```
 
 Las pruebas de integración corren contra PostgreSQL de verdad, no contra un doble del driver: cada worker crea su propia base (`gopass_tasks_test_<id>`), aplica las migraciones y trunca entre casos, así que los archivos siguen ejecutándose en paralelo. Simular el driver probaría el simulador.
 
-Los escenarios E2E cubren lo único que la integración no puede: que el estado venga de PostgreSQL y no de React —de ahí la recarga en mitad del flujo—, que el 409 **llegue a los ojos del usuario** y no solo al cuerpo de la respuesta, y que arrastrar una tarjeta la mueva de verdad y soltarla fuera la devuelva a su sitio.
+Los escenarios E2E cubren lo único que la integración no puede: que el estado venga de PostgreSQL y no de React —de ahí la recarga en mitad del flujo—, que el 409 **llegue a los ojos del usuario** y no solo al cuerpo de la respuesta, y que arrastrar una tarjeta la deje en la posición prometida y no en otra.
+
+Cada prueba se validó rompiendo a propósito el código que cubre y comprobando que falla, antes de deshacer la rotura. Una prueba que nunca se ha visto en rojo no ha demostrado nada.
 
 ```bash
 npm run test        # backend + frontend
 npm run test:e2e    # Playwright (requiere docker compose up -d db)
 ```
 
-El [pipeline de CI](.github/workflows/ci.yml) ejecuta lint, typecheck, las pruebas contra un PostgreSQL real, ambos builds, los E2E y un quality gate. Estrategia completa y matriz de trazabilidad de los 16 requisitos en [docs/spec/05-estrategia-calidad.md](docs/spec/05-estrategia-calidad.md).
+El [pipeline de CI](.github/workflows/ci.yml) ejecuta lint, typecheck, las pruebas contra un PostgreSQL real, ambos builds, los E2E y un quality gate. Estrategia completa y matriz de trazabilidad de los 17 requisitos en [docs/spec/05-estrategia-calidad.md](docs/spec/05-estrategia-calidad.md).
 
 ## Desarrollo fuera de contenedores
 
@@ -135,9 +161,11 @@ El cliente pide siempre a `/api`, una ruta relativa: la reenvía el proxy de Vit
 
 Se acotó de forma explícita y por escrito **antes** de empezar. Los requisitos, con sus criterios de aceptación y la lista de lo descartado con su razón, están en [docs/spec/01-requisitos.md](docs/spec/01-requisitos.md).
 
-Fuera de alcance: **autenticación y roles** (no están en el enunciado y traen consigo un modelo de identidad completo), **paginación** (no aporta a este volumen; el umbral a partir del cual sería obligatoria está documentado) y **borrado lógico y auditoría** (sin requisito de trazabilidad, contaminan todas las consultas). Las fechas de vencimiento se incorporaron en SL-17 y las etiquetas de color en SL-18.
+Fuera de alcance: **autenticación y roles** (no están en el enunciado y traen consigo un modelo de identidad completo), **paginación** (no aporta a este volumen; el umbral a partir del cual sería obligatoria está documentado) y **borrado lógico y auditoría** (sin requisito de trazabilidad, contaminan todas las consultas).
 
-Límites conocidos del diseño actual: en edición concurrente gana la última escritura —con concurrencia real entraría una columna `version` y un 412—, y reasignar una tarea a otro proyecto existe en la API pero todavía no en la interfaz.
+Lo que sí creció después del alcance inicial, y por qué se dejó entrar: el límite de trabajo en curso (SL-12), las columnas configurables y su criterio de orden (SL-13 y SL-14), el orden manual de tarjetas (SL-15), el completado en un clic (SL-16), las fechas de vencimiento (SL-17), las etiquetas de color (SL-18), el tema oscuro y el fondo de tablero (SL-19), y dos correcciones del arrastre (SL-20 y SL-21). Cada uno tiene su *slice* en `openspec/changes/` y su issue con criterios de aceptación.
+
+Límites conocidos del diseño actual: en edición concurrente gana la última escritura —con concurrencia real entraría una columna `version` y un 412—, reasignar una tarea a otro proyecto existe en la API pero todavía no en la interfaz, y el semáforo de vencimiento se calcula en el cliente porque PostgreSQL prohíbe funciones no inmutables en columnas generadas y ningún trigger se dispara a medianoche.
 
 ## Documentación
 
@@ -146,11 +174,11 @@ Límites conocidos del diseño actual: en edición concurrente gana la última e
 | [Requisitos y trazabilidad](docs/spec/01-requisitos.md) | RF y RNF con criterios de aceptación; qué queda fuera y por qué |
 | [Modelo de dominio](docs/spec/02-modelo-dominio.md) | DDL completo, invariantes y decisiones de modelado |
 | [Contrato de API](docs/spec/03-contrato-api.md) | Endpoints, errores RFC 7807, mapeo `SQLSTATE`→HTTP |
-| [Arquitectura](docs/spec/04-arquitectura.md) | Capas, estructura y los 30 ADRs |
+| [Arquitectura](docs/spec/04-arquitectura.md) | Capas, estructura y los 35 ADRs |
 | [Estrategia de calidad](docs/spec/05-estrategia-calidad.md) | Pruebas, CI, quality gates y matriz de trazabilidad |
 | [Verificación de PostgreSQL](docs/spec/08-verificacion-postgres.md) | Mediciones contra el motor que decidieron el modelo de datos |
 | [Desarrollo asistido por IA](docs/process/ai-assisted-development.md) | Cómo se trabajó y qué se verificó |
 
 ## Stack
 
-TypeScript estricto en ambos extremos (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`). Express 4 · Zod · `pg` · `node-pg-migrate` · PostgreSQL 16 · React 18 · Vite 6 · TanStack Query 5 · Tailwind 4 · Vitest · Supertest · Playwright · Docker Compose · GitHub Actions.
+TypeScript estricto en ambos extremos (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`). Express 4 · Zod · `pg` · `node-pg-migrate` · PostgreSQL 16 · React 18 · Vite 6 · TanStack Query 5 · Tailwind 4 · `@dnd-kit` · `lucide-react` · Vitest · Supertest · Playwright · Docker Compose · GitHub Actions · Vercel · Supabase.
