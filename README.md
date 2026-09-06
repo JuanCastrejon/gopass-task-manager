@@ -44,7 +44,7 @@ Crear proyectos, asociarles tareas con estado y prioridad, y ver el trabajo de f
 | **Panel** | Totales, avance global y reparto de tareas por estado, agregados en la base de un solo viaje |
 | **Proyectos** | Alta, edición y borrado, con barra de avance calculada en SQL |
 | **Tablero** | Columnas **configurables por proyecto**: crear, renombrar desde su propia cabecera, reordenar y borrar reasignando lo que contienen |
-| **Límite de trabajo en curso** | Opcional y por columna, no por proyecto: «Desarrollo máximo 3» y «QA máximo 2» son políticas distintas y coexisten |
+| **Límite de trabajo en curso** | Opcional y por columna, no por proyecto: «Desarrollo máximo 3» y «QA máximo 2» son políticas distintas y coexisten. Se elige al crear el proyecto con una plantilla, y se ajusta después columna a columna desde «Editar» |
 | **Orden de las tarjetas** | Por columna, entre cinco criterios o manual arrastrando, con posición fraccionaria para no reescribir la columna entera |
 | **Tarjetas** | Fecha de vencimiento con semáforo temporal, etiquetas de color y completado en un clic |
 | **Filtros** | Viven en la URL: un tablero filtrado se comparte por enlace y sobrevive a una recarga |
@@ -75,7 +75,7 @@ Un `CHECK` verifica la invariante `DONE ⟺ completed_at IS NOT NULL` y un trigg
 **5. Sin ORM y sin librería de enrutado.**
 Dos entidades no justifican una abstracción que oculta el control granular del SQL y los planes de ejecución; el patrón repositorio da el mismo aislamiento. Para el enrutado se midió el coste real de `react-router-dom` en este bundle —**+13.4 KB gzip para dos rutas**— y se resolvió con la History API.
 
-El registro completo son **35 ADRs** en [docs/spec/04-arquitectura.md](docs/spec/04-arquitectura.md), cada uno con su contexto, sus alternativas descartadas y por qué.
+El registro completo son **36 ADRs** en [docs/spec/04-arquitectura.md](docs/spec/04-arquitectura.md), cada uno con su contexto, sus alternativas descartadas y por qué.
 
 ## Arquitectura
 
@@ -122,8 +122,8 @@ Veintitrés endpoints. Errores en `application/problem+json` (RFC 7807) con un `
 ## Calidad
 
 ```
-258 pruebas    149 backend (integración contra PostgreSQL real) · 85 frontend · 24 E2E
-96.67 %       cobertura de líneas del backend funcional
+274 pruebas    155 backend (integración contra PostgreSQL real) · 93 frontend · 26 E2E
+96.61 %       cobertura de líneas del backend funcional
 ```
 
 Las pruebas de integración corren contra PostgreSQL de verdad, no contra un doble del driver: cada worker crea su propia base (`gopass_tasks_test_<id>`), aplica las migraciones y trunca entre casos, así que los archivos siguen ejecutándose en paralelo. Simular el driver probaría el simulador.
@@ -174,7 +174,7 @@ Límites conocidos del diseño actual: en edición concurrente gana la última e
 | [Requisitos y trazabilidad](docs/spec/01-requisitos.md) | RF y RNF con criterios de aceptación; qué queda fuera y por qué |
 | [Modelo de dominio](docs/spec/02-modelo-dominio.md) | DDL completo, invariantes y decisiones de modelado |
 | [Contrato de API](docs/spec/03-contrato-api.md) | Endpoints, errores RFC 7807, mapeo `SQLSTATE`→HTTP |
-| [Arquitectura](docs/spec/04-arquitectura.md) | Capas, estructura y los 35 ADRs |
+| [Arquitectura](docs/spec/04-arquitectura.md) | Capas, estructura y los 36 ADRs |
 | [Estrategia de calidad](docs/spec/05-estrategia-calidad.md) | Pruebas, CI, quality gates y matriz de trazabilidad |
 | [Verificación de PostgreSQL](docs/spec/08-verificacion-postgres.md) | Mediciones contra el motor que decidieron el modelo de datos |
 | [Desarrollo asistido por IA](docs/process/ai-assisted-development.md) | Cómo se trabajó y qué se verificó |
