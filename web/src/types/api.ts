@@ -24,6 +24,7 @@ export const COLUMN_SORTS = [
   'priority_asc',
   'created_desc',
   'created_asc',
+  'due_asc',
 ] as const;
 export type ColumnSort = (typeof COLUMN_SORTS)[number];
 
@@ -33,6 +34,7 @@ export const COLUMN_SORT_LABEL: Record<ColumnSort, string> = {
   priority_asc: 'Prioridad baja primero',
   created_desc: 'Más recientes primero',
   created_asc: 'Más antiguas primero',
+  due_asc: 'Lo que vence antes',
 };
 
 /**
@@ -105,6 +107,8 @@ export interface Task {
   priority: TaskPriority;
   /** Posición fraccionaria calculada por el servidor para el orden manual en la columna. */
   position: number;
+  /** Fecha de vencimiento (YYYY-MM-DD) o null si no tiene. */
+  dueDate: string | null;
   /** Lo sella la base en la transición a DONE. La API rechaza escribirlo. */
   completedAt: string | null;
   createdAt: string;

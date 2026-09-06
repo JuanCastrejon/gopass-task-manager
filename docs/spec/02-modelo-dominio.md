@@ -186,6 +186,19 @@ CREATE TRIGGER tasks_set_position
 
 Si la asignación de posición viviera solo en el servicio, cualquier inserción desde el seed o desde `psql` fallaría al violar el `NOT NULL`. El trigger asigna automáticamente `MAX(position) + 1024.0` al final de la columna cuando la fila no trae posición explícita.
 
+### Fecha de vencimiento como `date` puro (sin hora)
+
+```sql
+ALTER TABLE tasks ADD COLUMN due_date date;
+ALTER TYPE column_sort ADD VALUE IF NOT EXISTS 'due_asc';
+```
+
+La fecha de vencimiento (`tasks.due_date`, migración `0008_tasks_due_date.sql`) utiliza el tipo `date` y no `timestamptz`. Esta elección se fundamenta en mediciones empíricas de desfase horario entre entornos:
+- Los contenedores Docker de la base de datos y de la API operan en **UTC**.
+- El equipo de desarrollo y los usuarios operan en husos locales como **America/Bogota (GMT-05:00)**.
+
+Entre las 19:00 y las 23:59 locales de Bogotá (5 horas al día), el contenedor se encuentra en la fecha del día siguiente. Si se utilizara `timestamptz`, una fecha «vence el 12 de marzo» almacenada como medianoche UTC (`2026-03-12T00:00:00Z`) se proyectaría en Bogotá como **el 11 de marzo a las 19:00**, haciendo que la tarjeta cambie de fecha según el huso horario de quien la observe. Con `due_date date NULL` no existe componente horario ni conversión de zona: la cadena `YYYY-MM-DD` es universal e idéntica para todos los usuarios.
+
 ### Índices
 
 ```sql
@@ -236,6 +249,7 @@ CREATE TABLE tasks (
   status       task_status      NOT NULL DEFAULT 'TODO',
   priority     task_priority    NOT NULL DEFAULT 'MEDIUM',
   position     double precision NOT NULL,
+  due_date     date,
   completed_at timestamptz,
   created_at   timestamptz      NOT NULL DEFAULT now(),
   updated_at   timestamptz      NOT NULL DEFAULT now(),
@@ -315,7 +329,7 @@ Un proyecto se deja **sin tareas** a propósito: es el caso que demuestra el est
 
 | Tema | Postura escrita en `docs/decisions.md` |
 |---|---|
-| Fecha de vencimiento | La columna **no** está en el esquema. Añadir una columna nullable sin default es una operación de catálogo instantánea en PostgreSQL desde la versión 11, así que "dejar la base preparada" no compra nada; en cambio, un `dueDate: null` en toda respuesta de la API que ningún cliente consume se lee como alcance abandonado. Si entra, entra completa —migración `0002`, contrato y UI— antes del feature freeze. |
+| Fecha de vencimiento | **Incorporada en SL-17** (migración `0008_tasks_due_date.sql`, ADR-028). Se implementó completa de punta a punta: columna `due_date date` en PostgreSQL, parser de identidad para OID 1082 en `pg`, soporte en contrato y esquemas Zod, criterio de ordenación `due_asc` y semáforo reactivo en cliente. |
 | Soft delete | Se haría con `deleted_at` y vistas filtradas si existiera requisito de auditoría o retención regulatoria. No existe aquí, y contamina todas las consultas. |
 | Particionado / paginación | Innecesario a este volumen. El umbral práctico está en el orden de decenas de miles de tareas por proyecto; a partir de ahí, paginación por cursor sobre `(created_at, id)`. |
 | Concurrencia en edición | Hoy gana la última escritura. Con edición concurrente real se añadiría una columna `version` y respuesta `412 Precondition Failed`. Se menciona porque conocer el límite del diseño es parte del criterio. |

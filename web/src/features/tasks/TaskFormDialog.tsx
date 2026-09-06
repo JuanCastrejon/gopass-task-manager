@@ -10,6 +10,7 @@ import {
   type TaskPriority,
 } from '../../types/api.ts';
 import { useCreateTask, useUpdateTask } from './api.ts';
+import { evaluarCompletado } from './due-date.ts';
 
 interface Props {
   open: boolean;
@@ -36,6 +37,7 @@ export function TaskFormDialog({
   const [description, setDescription] = useState('');
   const [columnId, setColumnId] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('MEDIUM');
+  const [dueDate, setDueDate] = useState('');
 
   const create = useCreateTask(projectId);
   const update = useUpdateTask();
@@ -47,6 +49,7 @@ export function TaskFormDialog({
     setDescription(task?.description ?? '');
     setColumnId(task?.columnId ?? defaultColumnId ?? columnas[0]?.id ?? '');
     setPriority(task?.priority ?? 'MEDIUM');
+    setDueDate(task?.dueDate ?? '');
     mutation.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, task?.id, defaultColumnId]);
@@ -73,13 +76,20 @@ export function TaskFormDialog({
             description: limpio === '' ? null : limpio,
             columnId,
             priority,
+            dueDate: dueDate === '' ? null : dueDate,
           },
         },
         { onSuccess: onClose },
       );
     } else {
       create.mutate(
-        { title: title.trim(), columnId, priority, ...(limpio === '' ? {} : { description: limpio }) },
+        {
+          title: title.trim(),
+          columnId,
+          priority,
+          dueDate: dueDate === '' ? null : dueDate,
+          ...(limpio === '' ? {} : { description: limpio }),
+        },
         { onSuccess: onClose },
       );
     }
@@ -162,6 +172,43 @@ export function TaskFormDialog({
               ))}
             </select>
           </div>
+        </div>
+
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <label htmlFor="task-due-date" className="block text-sm font-medium">
+              Fecha de vencimiento <span className="font-normal text-ink-muted">(opcional)</span>
+            </label>
+            {editing && task.status === 'DONE' && (
+              (() => {
+                const estado = evaluarCompletado(task.completedAt, dueDate || null);
+                if (estado === 'a_tiempo') {
+                  return (
+                    <span className="inline-flex items-center gap-1 rounded bg-status-done-soft px-2 py-0.5 text-[11px] font-medium text-status-done">
+                      Completada a tiempo
+                    </span>
+                  );
+                }
+                if (estado === 'tarde') {
+                  return (
+                    <span className="inline-flex items-center gap-1 rounded bg-danger-soft px-2 py-0.5 text-[11px] font-medium text-danger">
+                      Completada tarde
+                    </span>
+                  );
+                }
+                return null;
+              })()
+            )}
+          </div>
+          <input
+            type="date"
+            id="task-due-date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            aria-invalid={errores['dueDate'] !== undefined || undefined}
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
+          />
+          {errores['dueDate'] && <p className="mt-1 text-xs text-danger">{errores['dueDate']}</p>}
         </div>
 
         {mutation.isError && Object.keys(errores).length === 0 && (

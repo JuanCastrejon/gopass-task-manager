@@ -37,6 +37,25 @@ export const projectScopedParamsSchema = z.object({
  */
 const strictMessage = 'Campo no reconocido o de solo lectura.';
 
+/**
+ * Fecha de vencimiento en formato ISO `YYYY-MM-DD`.
+ *
+ * Se rechaza cualquier componente horario y cualquier fecha calendario inexistente
+ * (ej. 2026-02-31), devolviendo mensajes de error en español.
+ */
+const dueDateSchema = z
+  .string({ invalid_type_error: 'La fecha de vencimiento debe tener el formato YYYY-MM-DD.' })
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha de vencimiento debe tener el formato YYYY-MM-DD.')
+  .refine((val) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(val);
+    if (!match) return false;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const d = new Date(Date.UTC(year, month - 1, day));
+    return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
+  }, 'La fecha de vencimiento debe ser una fecha válida.');
+
 export const createTaskSchema = z
   .object({
     title: z.string().trim().min(1, 'El título no puede estar vacío.').max(200, 'El título supera los 200 caracteres.'),
@@ -49,6 +68,7 @@ export const createTaskSchema = z
      */
     columnId: z.string().uuid('El identificador de columna debe ser un UUID.').optional(),
     priority: z.enum(TASK_PRIORITIES).optional(),
+    dueDate: dueDateSchema.nullable().optional(),
   })
   .strict(strictMessage);
 
@@ -60,6 +80,7 @@ export const patchTaskSchema = z
     /** Ver la nota de `createTaskSchema`: gana sobre `status`. */
     columnId: z.string().uuid('El identificador de columna debe ser un UUID.').optional(),
     priority: z.enum(TASK_PRIORITIES).optional(),
+    dueDate: dueDateSchema.nullable().optional(),
     /**
      * Reasignar la tarea a otro proyecto.
      *

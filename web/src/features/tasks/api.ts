@@ -63,6 +63,7 @@ export interface CreateTaskInput {
   /** Gana sobre `status`: solo el identificador distingue entre columnas de la misma categoría. */
   columnId?: string;
   priority?: TaskPriority;
+  dueDate?: string | null;
 }
 
 export interface PatchTaskInput {
@@ -72,6 +73,7 @@ export interface PatchTaskInput {
   /** Gana sobre `status`. Ver la nota de `CreateTaskInput`. */
   columnId?: string;
   priority?: TaskPriority;
+  dueDate?: string | null;
 }
 
 export function useCreateTask(projectId: string) {

@@ -784,7 +784,7 @@ export const openApiSpec = {
           },
           sort: {
             type: 'string',
-            enum: ['priority_desc', 'priority_asc', 'created_desc', 'created_asc', 'manual'],
+            enum: ['priority_desc', 'priority_asc', 'created_desc', 'created_asc', 'manual', 'due_asc'],
             description: 'Criterio de orden de las tareas dentro de la columna. Compartido por el equipo.',
           },
           createdAt: { type: 'string', format: 'date-time' },
@@ -810,7 +810,7 @@ export const openApiSpec = {
           wipLimit: { type: 'integer', nullable: true, minimum: 1, maximum: 100 },
           sort: {
             type: 'string',
-            enum: ['priority_desc', 'priority_asc', 'created_desc', 'created_asc', 'manual'],
+            enum: ['priority_desc', 'priority_asc', 'created_desc', 'created_asc', 'manual', 'due_asc'],
           },
         },
       },
@@ -822,7 +822,7 @@ export const openApiSpec = {
           wipLimit: { type: 'integer', nullable: true, minimum: 1, maximum: 100 },
           sort: {
             type: 'string',
-            enum: ['priority_desc', 'priority_asc', 'created_desc', 'created_asc', 'manual'],
+            enum: ['priority_desc', 'priority_asc', 'created_desc', 'created_asc', 'manual', 'due_asc'],
           },
         },
       },
@@ -843,7 +843,7 @@ export const openApiSpec = {
       },
       Task: {
         type: 'object',
-        required: ['id', 'projectId', 'title', 'status', 'priority', 'position', 'completedAt', 'createdAt', 'updatedAt'],
+        required: ['id', 'projectId', 'title', 'status', 'priority', 'position', 'dueDate', 'completedAt', 'createdAt', 'updatedAt'],
         properties: {
           id: { type: 'string', format: 'uuid' },
           projectId: { type: 'string', format: 'uuid' },
@@ -861,6 +861,13 @@ export const openApiSpec = {
             format: 'double',
             description: 'Posición fraccionaria de ordenación manual dentro de la columna.',
             example: 1024.0,
+          },
+          dueDate: {
+            type: 'string',
+            format: 'date',
+            nullable: true,
+            example: '2026-03-12',
+            description: 'Fecha de vencimiento en formato YYYY-MM-DD (sin componente horario).',
           },
           completedAt: { type: 'string', format: 'date-time', nullable: true, example: null },
           createdAt: { type: 'string', format: 'date-time' },
@@ -895,6 +902,7 @@ export const openApiSpec = {
           description: { type: 'string', maxLength: 5000, nullable: true, example: 'Detalle de la tarea' },
           status: { type: 'string', enum: ['TODO', 'IN_PROGRESS', 'DONE'], default: 'TODO' },
           priority: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'], default: 'MEDIUM' },
+          dueDate: { type: 'string', format: 'date', nullable: true, example: '2026-03-12' },
         },
       },
       PatchTaskInput: {
@@ -904,6 +912,7 @@ export const openApiSpec = {
           description: { type: 'string', maxLength: 5000, nullable: true },
           status: { type: 'string', enum: ['TODO', 'IN_PROGRESS', 'DONE'] },
           priority: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },
+          dueDate: { type: 'string', format: 'date', nullable: true, example: '2026-03-12' },
           projectId: { type: 'string', format: 'uuid', description: 'Reasignar a otro proyecto' },
         },
       },

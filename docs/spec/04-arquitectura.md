@@ -637,6 +637,83 @@ porque viola el principio fundacional que sustenta los triggers del repositorio 
 suprema de verdad; si una columna nueva debe nacer con orden manual, el valor por defecto debe estar
 sellado en el esquema de la tabla.
 
+---
+
+### ADR-027 — Completar una tarea moviéndola, no con un campo aparte
+
+**Contexto.** Trello marca una tarjeta como «completada» mediante un campo de la propia tarjeta **independiente de la lista**: se pasa el ratón por encima, se pulsa el círculo, se pone verde, y la tarjeta **no se mueve** (fuente: [Atlassian Support — Add and customize cards and lists](https://support.atlassian.com/trello/docs/add-and-customize-cards-and-lists/)).
+
+El modelo de datos de este proyecto hace lo contrario y por diseño fundacional:
+1. La restricción `CHECK` de `tasks` liga estrictamente `status = 'DONE'` con `completed_at IS NOT NULL`.
+2. El trigger `tasks_set_completed_at` (migración `0001_initial_schema.sql`) lo sella automáticamente solo en la transición hacia `DONE` (y lo limpia a `NULL` al salir).
+3. La clave foránea compuesta `(column_id, status) REFERENCES project_columns (id, category)` impide físicamente que la columna y el estado diverjan.
+
+En este diseño, «completada» y «está en una columna de categoría DONE» son rigurosamente la misma proposición.
+
+**Decisión.** El control de completado mueve la tarea a una columna de categoría `DONE`. Si el proyecto cuenta con más de una columna `DONE`, se despliega un menú accesible para que el usuario elija el destino; **nunca se elige «la primera»**, que constituiría una regla opaca no visible para el usuario.
+
+**Medición que lo decidió.** Desacoplar «completada» en un booleano independiente (`is_completed`) requería modificar los **cuatro** puntos neurálgicos que hoy derivan el estado de completitud de `status = 'DONE'`:
+1. El cálculo `COUNT(...) FILTER (WHERE status = 'DONE')` del avance de proyecto en `projects.repository.ts` (`api/src/modules/projects/projects.repository.ts`).
+2. El `COUNT` de tareas completadas en el endpoint `/api/stats` (`api/src/modules/stats/stats.routes.ts`).
+3. El trigger de integridad `tasks_set_completed_at` de la migración `0001` (`api/migrations/0001_initial_schema.sql`).
+4. El renderizado y tachado visual en `TaskCard` (`web/src/features/tasks/TaskCard.tsx`).
+Adicionalmente, obligaba a actualizar el contrato de la API (`03-contrato-api.md`), la especificación OpenAPI en Swagger (`api/src/docs/swagger.ts`), y todas las suites de integración.
+
+En contraste, mover la tarea **no toca el backend en absoluto**: SL-16 se implementó con dos archivos modificados exclusivamente en el frontend (`web/src/features/tasks/TaskCard.tsx` y `web/src/features/tasks/TaskBoard.tsx`) y cero cambios en `api/`.
+
+**Argumento de coherencia de flujo.** Con un campo independiente, una tarjeta marcada como completada dentro de una columna intermedia («En curso») **seguiría consumiendo el límite de trabajo en curso (WIP)** de dicha columna. Permitir tareas completadas que ocupan cupo en una fase activa es conceptualmente incoherente con el significado del límite de WIP (ADR-022).
+
+**Semántica accesible.** El control no es un `role="checkbox"` ni utiliza `aria-pressed`; es un `<button>` convencional (`<button type="button">`). La acción traslada la tarjeta a otro contenedor en el DOM y en el tablero en lugar de conmutar una propiedad booleana local; prometer una casilla de verificación a un usuario de lector de pantalla comunicaría erróneamente lo que sucede.
+Cuando existen múltiples destinos:
+- El botón disparador declara `aria-haspopup="menu"` y `aria-expanded`.
+- Al abrir el menú, el foco viaja automáticamente al primer destino seleccionable.
+- La tecla `Escape` cierra el menú sin mover la tarea y devuelve el foco inmediatamente al disparador.
+- La interacción completa se verificó en navegador y está blindada por pruebas de componentes y E2E.
+
+**Precedente contrario, para que conste.** `usekaneo/kaneo` (8 967 estrellas) resuelve la ambigüedad de destino recurriendo a una cascada automática en backend: `requestedColumn ?? matchingCurrentColumn ?? firstColumn` (`apps/api/src/task/controllers/move-task.ts`). La prueba 2 de `completar-tarea.test.tsx` se validó introduciendo intencionadamente dicho antipatrón para confirmar que la aplicación exige la elección explícita del usuario y no mueve a la primera columna en silencio.
+
+**Alternativas descartadas:**
+1. **Campo `is_completed` independiente (estilo Trello).** Descartada por romper la invariante relacional con las columnas, exigir refactorizar 4 subsistemas del backend y corromper el cálculo del WIP limit.
+2. **Un botón que también desmarque la tarea en el mismo control.** Descartada porque **el camino de vuelta ya existía y cuesta un solo clic**: una tarjeta situada en una columna terminal (`DONE`) conserva el botón de flecha que la mueve a la columna contigua anterior, con su etiqueta accesible indicando exactamente a cuál. Un menú de reapertura requeriría dos clics más gestión de foco para duplicar una capacidad preexistente. Por ello, en una tarea completada el círculo pasa a ser **un indicador visual y accesible de estado y no un botón**: un control pulsable que no realiza ninguna acción sería peor que un indicador honesto.
+
+---
+
+### ADR-028 — La fecha de vencimiento es `date`, y el semáforo se calcula en el cliente
+
+**Contexto.** Medición real tomada en la máquina de desarrollo:
+```
+contenedor db  → timezone UTC,  current_date 2026-09-06
+contenedor api → UTC
+equipo         → America/Bogota, GMT-0500
+```
+Entre las 19:00 y las 23:59 de Bogotá (cinco horas al día), el contenedor se encuentra en la fecha del día siguiente mientras el usuario continúa en el día actual.
+
+**Decisión 1: `due_date date`, sin hora.** Con `timestamptz`, una fecha «vence el 12 de marzo» almacenada como medianoche UTC (`2026-03-12T00:00:00Z`) se proyecta en Bogotá como **el 11 de marzo a las 19:00**: la tarjeta cambiaría de día en el tablero según el huso horario del cliente que la observe. El tipo `date` (migración `0008_tasks_due_date.sql`) almacena una fecha civil pura. La cadena `YYYY-MM-DD` es universal e idéntica para todos los observadores.
+
+**El driver `pg` reintroducía el problema.** Por defecto, el driver `pg` convierte las columnas `DATE` de PostgreSQL (OID 1082) en instancias de `Date` de JavaScript fijadas a medianoche UTC. Al serializarse a JSON en Express mediante `JSON.stringify()`, el objeto vuelve a convertirse en un instante con zona horaria (`"2026-03-12T00:00:00.000Z"`), provocando que un cliente al oeste de UTC desplace la fecha al día anterior.
+Para resolverlo, se registró un parser de tipo de identidad en `api/src/db/pool.ts`:
+```ts
+pg.types.setTypeParser(1082, (val: string) => val);
+```
+Esto garantiza que la cadena `YYYY-MM-DD` entregada por PostgreSQL viaje intacta por HTTP. Hay una prueba de integración de ida y vuelta que blinda este comportamiento, comprobando que `2026-03-12` entra, se persiste y sale sin desplazarse.
+
+**Decisión 2: El semáforo de vencimiento se calcula en el cliente.** Representa una **excepción deliberada** al principio general del proyecto de alojar las invariantes de negocio en el motor de base de datos (ADR-004 y ADR-009).
+La justificación es técnica y física: «vencida» no es un dato de la entidad, sino **una función del momento exacto en que se consulta**.
+1. PostgreSQL prohíbe funciones no inmutables como `CURRENT_DATE` o `now()` en columnas generadas (`GENERATED ALWAYS ... AS ... STORED`).
+2. Ningún trigger relacional se ejecuta a medianoche sin escrituras concurrentes que lo disparen.
+No es que se prefiera evitar el motor: es que **técnicamente no se puede alojar en PostgreSQL sin procesos batch o demonios externos**.
+
+**Decisión 3: La ventana de aviso temprano («vence pronto») son 3 días naturales, hoy incluido.** En la discusión entre 2 y 3 días prevaleció el argumento operativo del calendario laboral: un viernes por la tarde es imprescindible que el tablero alerte de las tareas que vencen el lunes siguiente.
+
+**Decisión 4: Una tarea completada deja de alarmar.** Tenga la fecha de vencimiento que tenga, una tarjeta terminada ya no requiere acción preventiva; la insignia se atenúa a tonos neutros (`bg-canvas text-ink-muted/70`).
+El diagnóstico secundario («completada a tiempo» o «completada tarde») se muestra en el diálogo de edición y se calcula comparando **fechas civiles locales** (`localCompletedDate <= dueDate`). Realizar esta comparación en SQL mezclaría un tipo `date` con un `timestamptz` (`completed_at`), reintroduciendo el huso horario del servidor por la puerta de atrás.
+
+**Comportamiento visual y accesible.** La insignia de vencimiento se muestra **siempre que la tarea tenga fecha asignada**, no únicamente cuando está próxima a vencer o vencida. Además, el estado se comunica de forma redundante en el texto visible (`Vencida · 12 mar`, `Vence hoy · 12 mar`, `Vence pronto · 12 mar`) y en el atributo `aria-label`, respetando el criterio de accesibilidad de nunca transmitir información exclusivamente a través del color.
+
+**Alternativas descartadas:**
+1. **`timestamptz` con hora opcional al estilo Trello.** Descartada por el desfase medido de 5 horas entre Bogotá y los contenedores UTC, que alteraría el día de la tarjeta en horario vespertino.
+2. **Devolver el semáforo calculado como campo derivado desde la API.** Descartada porque la respuesta HTTP quedaría obsoleta al instante siguiente si cruza la medianoche, además de supeditar el estado de urgencia al reloj del contenedor (UTC) en lugar de al reloj civil del usuario local.
+
 ## 4. Stack final
 
 | Capa | Elección | Versión |
@@ -654,7 +731,7 @@ sellado en el esquema de la tabla.
 | Modales | elemento nativo `<dialog>` | — |
 | Arrastre | `@dnd-kit/core` + `@dnd-kit/sortable` (ADR-021, ADR-025) | 6.3.1 / 10.0.0 |
 | Pruebas | Vitest + Supertest | — |
-| E2E | Playwright (11 escenarios) | — |
+| E2E | Playwright (14 escenarios) | — |
 | CI | GitHub Actions | — |
 | Gates | `sistema-multiagente-sdlc` (`quality-gate`, `coverage-diff`) | 2.2.2 |
 | Gestor de paquetes | npm | 10.x |

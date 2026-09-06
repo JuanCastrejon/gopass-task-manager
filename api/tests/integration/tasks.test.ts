@@ -690,3 +690,202 @@ describe('orden manual de tareas dentro de una columna (SL-15)', () => {
     expect(tareasFinales.map((t: { id: string }) => t.id)).toEqual([t2.id, t1.id, t3.id]);
   });
 });
+
+describe('fecha de vencimiento de las tareas (SL-17)', () => {
+  let projectId: string;
+  let columnId: string;
+
+  beforeEach(async () => {
+    const { body } = await request(app)
+      .post('/api/projects')
+      .send({ name: `Proyecto SL-17 ${Date.now()}` });
+    projectId = body.id;
+
+    const { body: columnas } = await request(app).get(`/api/projects/${projectId}/columns`);
+    columnId = columnas[0].id;
+  });
+
+  it('1. crear y editar con dueDate, y ponerlo a null', async () => {
+    // Crear con fecha de vencimiento
+    const postRes = await request(app)
+      .post(`/api/projects/${projectId}/tasks`)
+      .send({ title: 'Tarea con vencimiento', columnId, dueDate: '2026-03-12' });
+
+    expect(postRes.status).toBe(201);
+    expect(postRes.body.dueDate).toBe('2026-03-12');
+
+    const taskId = postRes.body.id;
+
+    // Editar fecha de vencimiento a otra fecha
+    const patchRes1 = await request(app)
+      .patch(`/api/tasks/${taskId}`)
+      .send({ dueDate: '2026-04-15' });
+
+    expect(patchRes1.status).toBe(200);
+    expect(patchRes1.body.dueDate).toBe('2026-04-15');
+
+    // Comprobar persistencia con GET
+    const getRes1 = await request(app).get(`/api/tasks/${taskId}`);
+    expect(getRes1.status).toBe(200);
+    expect(getRes1.body.dueDate).toBe('2026-04-15');
+
+    // Poner la fecha de vencimiento a null
+    const patchRes2 = await request(app)
+      .patch(`/api/tasks/${taskId}`)
+      .send({ dueDate: null });
+
+    expect(patchRes2.status).toBe(200);
+    expect(patchRes2.body.dueDate).toBeNull();
+
+    // Comprobar persistencia tras volver a null con GET
+    const getRes2 = await request(app).get(`/api/tasks/${taskId}`);
+    expect(getRes2.status).toBe(200);
+    expect(getRes2.body.dueDate).toBeNull();
+  });
+
+  it('2. rechazar un formato inválido con 400 y mensaje en español', async () => {
+    // Formato no YYYY-MM-DD
+    const resFormato = await request(app)
+      .post(`/api/projects/${projectId}/tasks`)
+      .send({ title: 'Formato DD-MM-YYYY', dueDate: '12-03-2026' });
+
+    expect(resFormato.status).toBe(400);
+    expect(resFormato.body.code).toBe('VALIDATION_ERROR');
+    expect(resFormato.body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'dueDate',
+          message: expect.stringMatching(/formato YYYY-MM-DD/i),
+        }),
+      ]),
+    );
+
+    // Fecha calendario inexistente (31 de febrero)
+    const resInexistente = await request(app)
+      .post(`/api/projects/${projectId}/tasks`)
+      .send({ title: 'Fecha no valida', dueDate: '2026-02-31' });
+
+    expect(resInexistente.status).toBe(400);
+    expect(resInexistente.body.code).toBe('VALIDATION_ERROR');
+    expect(resInexistente.body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'dueDate',
+          message: expect.stringMatching(/fecha válida/i),
+        }),
+      ]),
+    );
+
+    // Texto no fecha en patch
+    const resPatch = await request(app)
+      .patch(`/api/tasks/${projectId}`) // validará el body antes de buscar
+      .send({ dueDate: 'mañana' });
+
+    expect(resPatch.status).toBe(400);
+    expect(resPatch.body.code).toBe('VALIDATION_ERROR');
+    expect(resPatch.body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'dueDate',
+          message: expect.stringMatching(/formato YYYY-MM-DD/i),
+        }),
+      ]),
+    );
+  });
+
+  it('3. due_asc ordena por fecha con las tareas sin fecha al final', async () => {
+    // Configurar la columna con orden due_asc
+    const patchColRes = await request(app)
+      .patch(`/api/projects/${projectId}/columns/${columnId}`)
+      .send({ sort: 'due_asc' });
+    expect(patchColRes.status).toBe(200);
+    expect(patchColRes.body.sort).toBe('due_asc');
+
+    // Crear tareas en orden desordenado respecto a la fecha
+    const { body: tSinFecha } = await request(app)
+      .post(`/api/projects/${projectId}/tasks`)
+      .send({ title: 'Sin fecha', columnId, dueDate: null });
+
+    const { body: tLejana } = await request(app)
+      .post(`/api/projects/${projectId}/tasks`)
+      .send({ title: 'Lejana', columnId, dueDate: '2026-12-31' });
+
+    const { body: tTemprana } = await request(app)
+      .post(`/api/projects/${projectId}/tasks`)
+      .send({ title: 'Temprana', columnId, dueDate: '2026-01-15' });
+
+    const { body: tMedia } = await request(app)
+      .post(`/api/projects/${projectId}/tasks`)
+      .send({ title: 'Media', columnId, dueDate: '2026-06-20' });
+
+    // Listar las tareas y verificar el orden
+    const { body: lista } = await request(app).get(`/api/projects/${projectId}/tasks`);
+    const ids = lista.map((t: { id: string }) => t.id);
+
+    // El orden debe ser: tTemprana (enero) -> tMedia (junio) -> tLejana (diciembre) -> tSinFecha (null al final)
+    expect(ids).toEqual([tTemprana.id, tMedia.id, tLejana.id, tSinFecha.id]);
+  });
+
+  it('4. una columna con otro orden no se ve afectada por due_date (protege ADR-024)', async () => {
+    // Columna con orden priority_desc
+    await request(app)
+      .patch(`/api/projects/${projectId}/columns/${columnId}`)
+      .send({ sort: 'priority_desc' });
+
+    // Crear tarea LOW con fecha muy urgente (mañana)
+    const { body: tBajaUrgente } = await request(app)
+      .post(`/api/projects/${projectId}/tasks`)
+      .send({ title: 'Baja Urgente', columnId, priority: 'LOW', dueDate: '2026-01-01' });
+
+    // Crear tarea HIGH con fecha lejana (el año que viene)
+    const { body: tAltaLejana } = await request(app)
+      .post(`/api/projects/${projectId}/tasks`)
+      .send({ title: 'Alta Lejana', columnId, priority: 'HIGH', dueDate: '2027-12-31' });
+
+    // Crear tarea MEDIUM sin fecha
+    const { body: tMediaSinFecha } = await request(app)
+      .post(`/api/projects/${projectId}/tasks`)
+      .send({ title: 'Media Sin Fecha', columnId, priority: 'MEDIUM', dueDate: null });
+
+    const { body: lista } = await request(app).get(`/api/projects/${projectId}/tasks`);
+    const ids = lista.map((t: { id: string }) => t.id);
+
+    // La columna está configurada como priority_desc: el orden DEBE ser HIGH -> MEDIUM -> LOW,
+    // completamente inmune a las fechas de vencimiento (garantía de la escalera CASE de ADR-024)
+    expect(ids).toEqual([tAltaLejana.id, tMediaSinFecha.id, tBajaUrgente.id]);
+  });
+
+  it('5. la fecha viaja de ida y vuelta sin desplazarse un día', async () => {
+    // Guardar fecha específica propensa a desfasarse en medianoche UTC vs Bogotá (GMT-05:00)
+    const fechaEsperada = '2026-03-12';
+
+    const postRes = await request(app)
+      .post(`/api/projects/${projectId}/tasks`)
+      .send({ title: 'Comprobar desfase horario', columnId, dueDate: fechaEsperada });
+
+    expect(postRes.status).toBe(201);
+    expect(postRes.body.dueDate).toBe(fechaEsperada);
+
+    const taskId = postRes.body.id;
+
+    // Leer con GET unitario
+    const getUnitario = await request(app).get(`/api/tasks/${taskId}`);
+    expect(getUnitario.status).toBe(200);
+    expect(getUnitario.body.dueDate).toBe(fechaEsperada);
+
+    // Leer con GET de listado
+    const getListado = await request(app).get(`/api/projects/${projectId}/tasks`);
+    const tareaEncontrada = getListado.body.find((t: { id: string }) => t.id === taskId);
+    expect(tareaEncontrada?.dueDate).toBe(fechaEsperada);
+
+    // Verificar en la base de datos que el tipo es date puro y almacena la cadena sin hora
+    const { pool } = await import('../../src/db/pool.js');
+    const { rows } = await pool.query<{ due_date: string; tipo: string }>(
+      `SELECT due_date, pg_typeof(due_date)::text as tipo FROM tasks WHERE id = $1`,
+      [taskId],
+    );
+    expect(rows[0]?.tipo).toBe('date');
+    expect(rows[0]?.due_date).toBe(fechaEsperada);
+  });
+});
+

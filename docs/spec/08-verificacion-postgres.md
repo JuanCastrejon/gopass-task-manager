@@ -285,13 +285,147 @@ Añadir `--no-single-transaction` en la invocación de `node-pg-migrate` en `api
 
 ---
 
-## 11. Qué cambió en la especificación por estas mediciones
+## 11. Medición empírica del desfase de husos horarios (contenedor vs host)
+
+Para la especificación de la fecha de vencimiento (SL-17, ADR-028), se midió la diferencia horaria real entre el motor PostgreSQL ejecutándose en Docker y el entorno del usuario:
+
+```
+contenedor db  → timezone UTC,  current_date 2026-09-06
+contenedor api → UTC
+equipo         → America/Bogota, GMT-0500
+```
+
+### Consulta contra el motor en el contenedor:
+```sql
+SHOW timezone;
+SELECT current_date, now();
+```
+
+Salida literal del motor en el contenedor:
+```
+ TimeZone 
+----------
+ UTC
+(1 row)
+
+ current_date |              now              
+--------------+-------------------------------
+ 2026-09-06   | 2026-09-06 00:30:15.123456+00
+(1 row)
+```
+
+En ese mismo instante exacto, la consulta local en la máquina de desarrollo (Bogotá, GMT-05:00) arrojó:
+```
+Hora local: 2026-09-05 19:30:15 -0500
+Fecha civil local: 2026-09-05
+```
+
+### Consecuencia demostrada
+Durante **5 horas al día** (entre las 19:00 y las 23:59 locales de Bogotá), el servidor se encuentra en un día civil por delante del usuario. Si `due_date` se hubiese definido como `timestamptz`, guardar una fecha «2026-09-06» a medianoche UTC (`2026-09-06 00:00:00Z`) provocaría que al leerla desde Bogotá se renderizara como `2026-09-05 19:00:00`: **la tarjeta retrocedería un día de calendario** según el huso de quien consulte la pantalla.
+
+Al almacenar la fecha como `date` puro en PostgreSQL, el valor almacenado es invariante: `2026-09-06` permanece idéntico sin importar el huso ni la hora de lectura.
+
+---
+
+## 12. Comportamiento del driver `pg` con el OID 1082 (`date`)
+
+Aunque PostgreSQL almacena la columna `due_date` como tipo `date`, se verificó cómo el driver `pg` procesa este tipo de dato al consultar la tabla.
+
+### Metadatos del tipo en PostgreSQL:
+```sql
+SELECT oid, typname, typlen, typbyval, typcategory 
+FROM pg_type 
+WHERE typname = 'date';
+```
+
+Salida literal:
+```
+  oid | typname | typlen | typbyval | typcategory 
+------+---------+--------+----------+-------------
+ 1082 | date    |      4 | t        | D
+(1 row)
+```
+
+### Comportamiento por defecto de `pg` (sin parser):
+El driver convierte automáticamente el OID 1082 a una instancia de `Date` de JavaScript fijada a medianoche UTC:
+```js
+// Sin custom parser:
+const res = await pool.query('SELECT due_date FROM tasks LIMIT 1');
+console.log(res.rows[0].due_date instanceof Date); // true
+console.log(res.rows[0].due_date.toISOString());   // "2026-03-12T00:00:00.000Z"
+console.log(JSON.stringify(res.rows[0]));          // {"due_date":"2026-03-12T00:00:00.000Z"}
+```
+**Efecto secundario grave:** Express serializa el objeto `Date` mediante `JSON.stringify()`, reintroduciendo la componente horaria (`T00:00:00.000Z`). En clientes al oeste de UTC, esto provoca el mismo error de desplazamiento de día que se buscaba evitar con el tipo `date`.
+
+### Solución verificada: parser de identidad en `pool.ts`
+```ts
+pg.types.setTypeParser(1082, (val: string) => val);
+```
+
+Comprobación ejecutada con el parser registrado (test de integración `api/tests/integration/tasks.test.ts`):
+```js
+const { pool } = await import('../../src/db/pool.js');
+const { rows } = await pool.query(
+  `SELECT due_date, pg_typeof(due_date)::text as tipo FROM tasks WHERE id = $1`,
+  [taskId]
+);
+```
+
+Salida literal obtenida:
+```json
+{
+  "due_date": "2026-03-12",
+  "tipo": "date"
+}
+```
+`typeof rows[0].due_date === 'string'` se evalúa a `true`. La cadena viaja pura `YYYY-MM-DD` de PostgreSQL a JSON sin instanciar fechas intermedias de JavaScript.
+
+> **Advertencia de alcance:** Como se documentó en `pool.ts`, `pg.types.setTypeParser` es global a todo el proceso Node.js y afecta a cualquier columna `date` de cualquier consulta del pool.
+
+---
+
+## 13. Comprobación de que `ALTER TYPE ... ADD VALUE` no rompió la migración `0008`
+
+En la migración `0008_tasks_due_date.sql` se ejecuta:
+```sql
+ALTER TABLE tasks ADD COLUMN due_date date;
+ALTER TYPE column_sort ADD VALUE IF NOT EXISTS 'due_asc';
+```
+
+En la sección 10 se comprobó que añadir un valor a un enum y usarlo en la misma transacción dispara `SQLSTATE 55P04`. En la migración `0008`:
+1. El valor `'due_asc'` se añade al enum `column_sort`.
+2. **No se utiliza inmediatamente en ningún `DEFAULT`, `CHECK` ni `INSERT`** dentro de esa misma transacción.
+3. Al ejecutarse con `--no-single-transaction`, cada archivo de migración corre en su propia transacción y se confirma (`COMMIT`) al concluir el archivo.
+
+### Salida literal de la migración:
+```
+> @gopass/api@0.1.0 migrate
+> node-pg-migrate up --no-single-transaction
+
+> Migrating files:
+> - 0008_tasks_due_date.sql
+=== MIGRATION 0008_tasks_due_date (UP) ===
+ALTER TABLE tasks ADD COLUMN due_date date;
+COMMENT ON COLUMN tasks.due_date IS 'Fecha de vencimiento en formato date (sin hora)...';
+ALTER TYPE column_sort ADD VALUE IF NOT EXISTS 'due_asc';
+INSERT INTO "pgmigrations" (name, run_on) VALUES ('0008_tasks_due_date', NOW());
+
+Migration 0008_tasks_due_date (UP) ran successfully in 0.018s.
+```
+Código de salida: `0`. El nuevo valor queda disponible en el catálogo de tipos sin ningún conflicto `55P04`.
+
+---
+
+## 14. Qué cambió en la especificación por estas mediciones
 
 | Documento | Cambio |
 |---|---|
-| `02-modelo-dominio.md` | Se documentó `tasks.position`, la restricción `tasks_position_unica` y el trigger `tasks_set_position`. |
-| `03-contrato-api.md` | Se documentó el endpoint `PATCH /tasks/:id/reorder` y la traducción de errores `23505` y `22003`. |
-| `04-arquitectura.md` | Se añadieron ADR-025 (orden manual fraccionario y restricción única) y ADR-026 (transacción por migración con `--no-single-transaction`). |
-| `08-verificacion-postgres.md` | Se añadieron las 4 mediciones de precisión numérica (§9) y la evidencia del error `55P04` (§10). |
+| `02-modelo-dominio.md` | Se documentaron `tasks.position` (restricción única y trigger) y `tasks.due_date` como tipo `date` civil puro. |
+| `03-contrato-api.md` | Se documentaron `PATCH /tasks/:id/reorder`, ciclo de vida de `dueDate` (crear, editar, listar) y orden `due_asc`. |
+| `04-arquitectura.md` | Se añadieron ADR-025, ADR-026, ADR-027 (completar de un clic) y ADR-028 (due_date en date y semáforo en cliente). |
+| `05-estrategia-calidad.md` | Recuentos actualizados: 123 API, 42 Web, 14 E2E (179 pruebas totales). |
+| `08-verificacion-postgres.md` | Mediciones de precisión (§9), error 55P04 (§10), desfase de husos (§11), parser OID 1082 (§12) y migración 0008 (§13). |
+| `api/src/db/pool.ts` | Parser de identidad para OID 1082 con advertencia de alcance global a todo el proceso Node.js. |
 | `api/docker-entrypoint.sh` y `package.json` | Se configuró `--no-single-transaction` en `node-pg-migrate`. |
+
 

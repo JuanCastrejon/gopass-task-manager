@@ -131,6 +131,66 @@ Content-Type: application/json
 { "status": "IN_PROGRESS" }
 
 
+### ─────────────── fecha de vencimiento (SL-17) ───────────────
+
+### Crear una tarea con fecha de vencimiento válida
+# @name crearTareaConVencimiento
+POST {{host}}/projects/{{projectId}}/tasks
+Content-Type: application/json
+
+{
+  "title": "Renovar certificados SSL de peajes",
+  "priority": "HIGH",
+  "dueDate": "2026-03-12"
+}
+
+@taskIdVencimiento = {{crearTareaConVencimiento.response.body.id}}
+
+### Editar la fecha de vencimiento de la tarea
+PATCH {{host}}/tasks/{{taskIdVencimiento}}
+Content-Type: application/json
+
+{
+  "dueDate": "2026-04-15"
+}
+
+### Limpiar la fecha de vencimiento (volver a null)
+PATCH {{host}}/tasks/{{taskIdVencimiento}}
+Content-Type: application/json
+
+{
+  "dueDate": null
+}
+
+### Formato de fecha inválido (DD-MM-YYYY) → 400 VALIDATION_ERROR
+# La API exige formato estricto ISO YYYY-MM-DD sin componente horario
+POST {{host}}/projects/{{projectId}}/tasks
+Content-Type: application/json
+
+{
+  "title": "Tarea con formato inválido",
+  "dueDate": "12-03-2026"
+}
+
+### Fecha inexistente en el calendario gregoriano → 400 VALIDATION_ERROR
+# Zod valida la existencia real del día en calendario (el 31 de febrero no existe)
+POST {{host}}/projects/{{projectId}}/tasks
+Content-Type: application/json
+
+{
+  "title": "Tarea con fecha inexistente",
+  "dueDate": "2026-02-31"
+}
+
+### Texto no convertible a fecha en PATCH → 400 VALIDATION_ERROR
+PATCH {{host}}/tasks/{{taskIdVencimiento}}
+Content-Type: application/json
+
+{
+  "dueDate": "mañana"
+}
+
+
 ### ─────────────── filtros ───────────────
 
 ### Por estado, repetible
@@ -272,6 +332,9 @@ DELETE {{host}}/tasks/{{taskId3}}
 
 ### Borrar la cuarta tarea
 DELETE {{host}}/tasks/{{taskId4}}
+
+### Borrar la tarea con fecha de vencimiento
+DELETE {{host}}/tasks/{{taskIdVencimiento}}
 
 ### Y ahora sí, el proyecto vacío se borra → 204
 DELETE {{host}}/projects/{{projectId}}
