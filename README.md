@@ -55,7 +55,7 @@ Un `CHECK` verifica la invariante `DONE ⟺ completed_at IS NOT NULL` y un trigg
 **5. Sin ORM y sin librería de enrutado.**
 Dos entidades no justifican una abstracción que oculta el control granular del SQL y los planes de ejecución; el patrón repositorio da el mismo aislamiento. Para el enrutado se midió el coste real de `react-router-dom` en este bundle —**+13.4 KB gzip para dos rutas**— y se resolvió con la History API.
 
-El registro completo son **26 ADRs** en [docs/spec/04-arquitectura.md](docs/spec/04-arquitectura.md), cada uno con su contexto, sus alternativas descartadas y por qué.
+El registro completo son **28 ADRs** en [docs/spec/04-arquitectura.md](docs/spec/04-arquitectura.md), cada uno con su contexto, sus alternativas descartadas y por qué.
 
 ## Arquitectura
 
@@ -95,8 +95,8 @@ Trece endpoints. Errores en `application/problem+json` (RFC 7807) con un `code` 
 ## Calidad
 
 ```
-151 pruebas    117 backend (integración contra PostgreSQL real) · 23 frontend · 11 E2E
-96.93 %       cobertura de líneas del backend funcional
+179 pruebas    123 backend (integración contra PostgreSQL real) · 42 frontend · 14 E2E
+96.98 %       cobertura de líneas del backend funcional
 ```
 
 Las pruebas de integración corren contra PostgreSQL de verdad, no contra un doble del driver: cada worker crea su propia base (`gopass_tasks_test_<id>`), aplica las migraciones y trunca entre casos, así que los archivos siguen ejecutándose en paralelo. Simular el driver probaría el simulador.
@@ -132,7 +132,7 @@ El cliente pide siempre a `/api`, una ruta relativa: la reenvía el proxy de Vit
 
 Se acotó de forma explícita y por escrito **antes** de empezar. Los requisitos, con sus criterios de aceptación y la lista de lo descartado con su razón, están en [docs/spec/01-requisitos.md](docs/spec/01-requisitos.md).
 
-Fuera de alcance: **autenticación y roles** (no están en el enunciado y traen consigo un modelo de identidad completo), **paginación** (no aporta a este volumen; el umbral a partir del cual sería obligatoria está documentado), **borrado lógico y auditoría** (sin requisito de trazabilidad, contaminan todas las consultas) y **fechas de vencimiento**.
+Fuera de alcance: **autenticación y roles** (no están en el enunciado y traen consigo un modelo de identidad completo), **paginación** (no aporta a este volumen; el umbral a partir del cual sería obligatoria está documentado) y **borrado lógico y auditoría** (sin requisito de trazabilidad, contaminan todas las consultas). Las fechas de vencimiento se incorporaron en SL-17.
 
 Límites conocidos del diseño actual: en edición concurrente gana la última escritura —con concurrencia real entraría una columna `version` y un 412—, y reasignar una tarea a otro proyecto existe en la API pero todavía no en la interfaz.
 
@@ -143,7 +143,7 @@ Límites conocidos del diseño actual: en edición concurrente gana la última e
 | [Requisitos y trazabilidad](docs/spec/01-requisitos.md) | RF y RNF con criterios de aceptación; qué queda fuera y por qué |
 | [Modelo de dominio](docs/spec/02-modelo-dominio.md) | DDL completo, invariantes y decisiones de modelado |
 | [Contrato de API](docs/spec/03-contrato-api.md) | Endpoints, errores RFC 7807, mapeo `SQLSTATE`→HTTP |
-| [Arquitectura](docs/spec/04-arquitectura.md) | Capas, estructura y los 26 ADRs |
+| [Arquitectura](docs/spec/04-arquitectura.md) | Capas, estructura y los 28 ADRs |
 | [Estrategia de calidad](docs/spec/05-estrategia-calidad.md) | Pruebas, CI, quality gates y matriz de trazabilidad |
 | [Verificación de PostgreSQL](docs/spec/08-verificacion-postgres.md) | Mediciones contra el motor que decidieron el modelo de datos |
 | [Desarrollo asistido por IA](docs/process/ai-assisted-development.md) | Cómo se trabajó y qué se verificó |

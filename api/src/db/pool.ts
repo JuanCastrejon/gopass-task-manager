@@ -13,12 +13,17 @@ import { env } from '../config/env.js';
  * YYYY-MM-DD entregado por PostgreSQL viaje directamente como cadena pura en toda la API,
  * sin instanciar objetos Date intermedios ni depender de formateos manuales repetitivos
  * con `to_char` en cada consulta SQL.
+ *
+ * ADVERTENCIA DE ALCANCE: `pg.types.setTypeParser` es global a todo el proceso Node.js.
+ * Afecta a cualquier columna de tipo `date` de cualquier tabla, presente o futura.
+ * Hoy solo existe `tasks.due_date` en el esquema, por lo que no hay conflicto; cualquier
+ * desarrollador que incorpore una nueva columna `date` en el futuro heredará este
+ * comportamiento (cadena ISO `YYYY-MM-DD` sin objeto `Date`).
  */
 pg.types.setTypeParser(1082, (val: string) => val);
 
 /**
  * Un único pool para todo el proceso. Los repositorios reciben este pool
-
  * o un cliente de transacción; ninguno abre conexiones por su cuenta.
  */
 export const pool = new pg.Pool({

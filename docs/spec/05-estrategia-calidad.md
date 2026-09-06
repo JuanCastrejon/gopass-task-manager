@@ -12,10 +12,10 @@ El reparto no es doctrinal, es de retorno por hora dentro de un plazo de 20 hora
 
 | Tipo | Peso | Por qué |
 |---|---|---|
-| **Integración de API contra PostgreSQL real** | ~65 % | **117 pruebas**. Una sola prueba de `POST /projects → POST /tasks → PATCH status → GET` ejercita middleware, Zod, ruta, repositorio, SQL parametrizado y las restricciones reales del motor. Ningún otro tipo de prueba cubre tanto por línea escrita. |
-| **Unitarias de lógica no trivial** | ~15 % | Solo el mapeo `SQLSTATE`→HTTP, el cálculo de avance y la regla de `completed_at`. No se prueban getters ni se simula `pg`: simular el driver prueba el simulador. |
-| **Componentes de React** | ~10 % | **23 pruebas**. Los estados vacío, cargando y error de la vista de proyecto, con la API simulada a nivel de `fetch`, más las pruebas de filtros y tablero. |
-| **E2E con Playwright** | ~10 % | **11 escenarios**. Desde el ciclo completo y conflicto de borrado hasta columnas configurables, límites de WIP, arrastre entre columnas y reordenación manual dentro de columnas (SL-15). |
+| **Integración de API contra PostgreSQL real** | ~65 % | **123 pruebas**. Una sola prueba de `POST /projects → POST /tasks → PATCH status → GET` ejercita middleware, Zod, ruta, repositorio, SQL parametrizado y las restricciones reales del motor. Ningún otro tipo de prueba cubre tanto por línea escrita. |
+| **Unitarias de lógica no trivial** | ~15 % | Solo el mapeo `SQLSTATE`→HTTP, el cálculo de avance, la regla de `completed_at` y el semáforo puro de vencimiento. No se prueban getters ni se simula `pg`: simular el driver prueba el simulador. |
+| **Componentes de React y frontend** | ~10 % | **42 pruebas**. Los estados vacío, cargando y error de la vista de proyecto, con la API simulada a nivel de `fetch`, pruebas de filtros, tablero, 5 pruebas de completar tarea de un clic (SL-16) y 14 pruebas unitarias de fechas de vencimiento (SL-17). |
+| **E2E con Playwright** | ~10 % | **14 escenarios**. Desde el ciclo completo y conflicto de borrado hasta columnas configurables, límites de WIP, arrastre entre columnas, reordenación manual (SL-15), completar de un clic (SL-16) y fecha de vencimiento con semáforo (SL-17). |
 
 ### Aislamiento: una base por worker de Vitest
 
@@ -79,7 +79,9 @@ Un requisito sin prueba no se considera entregado. Esta tabla se completa durant
 | RF-10 | `PATCH` / `DELETE /api/tasks/:id` | ✅ parcial deja el resto intacto, `null` borra la descripción, body vacío → 400, 404 en ambas, 204 sin cuerpo · reasignación de proyecto y su 404 |
 | RF-11 | `GET /api/projects/:projectId/tasks` · `TaskBoard` | ✅ API: distingue proyecto sin tareas de proyecto inexistente, ordena por prioridad sin `CASE`, no mezcla tareas de otro proyecto · tablero implementado y verificado en navegador |
 | Arrastre | `TaskCard` + `TaskBoard` (ADR-021) | E2E escenario 3: mover entre columnas y persistir · escenario 4: soltar fuera devuelve la tarjeta y no dispara petición |
-| Orden manual (SL-15) | `TaskBoard` + `reorderTask` (ADR-025) | ✅ `tests/integration/tasks.test.ts` (reordenación, cálculo fraccionario, 60 inserciones en el mismo hueco, convivencia con ADR-024) · E2E escenarios 10 y 11 (`orden-manual-de-tareas.spec.ts`: persistencia tras recarga y bloqueo con aviso visible en columnas automáticas) |
+| Orden manual (SL-15) | `TaskBoard` + `reorderTask` (ADR-025) | ✅ `tests/integration/tasks.test.ts` (reordenación, cálculo fraccionario, 60 inserciones en el mismo hueco, convivencia con ADR-024) · E2E escenarios 13 y 14 (`orden-manual-de-tareas.spec.ts`: persistencia tras recarga y bloqueo con aviso visible en columnas automáticas) |
+| Completar de un clic (SL-16) | `TaskCard` + `TaskBoard` (ADR-027) | ✅ 5 pruebas en `web/src/features/tasks/__tests__/completar-tarea.test.tsx` (clic directo, menú con varios destinos, rechazo del antipatrón de Kaneo, indicador de estado en completadas y teclado accesible) · E2E escenarios 8 y 9 (`completar-de-un-clic.spec.ts`: completado directo y con múltiples columnas DONE) |
+| Fecha de vencimiento (SL-17) | `tasks.due_date` · `DueDateBadge` (ADR-028) | ✅ API: 5 pruebas en `tests/integration/tasks.test.ts` (CRUD con dueDate, validación en español, orden `due_asc` con nulls last, protección de ADR-024 e ida y vuelta sin desfase horario) · Web: 14 pruebas puras en `web/src/features/tasks/__tests__/due-date.test.ts` · E2E escenario 11 (`fecha-de-vencimiento.spec.ts`) |
 | RF-12 | `GET /api/stats` · `StatsPanel` | ✅ `tests/integration/stats.test.ts` → sin datos devuelve ceros con todas las claves presentes, agregados correctos, reparto por estado y prioridad, números y no los `bigint` como string |
 | RF-13 | filtros en `GET .../tasks` | ✅ **entró en SL-05** → estado y prioridad repetibles, combinación de ambos, `q` con `ILIKE` insensible a mayúsculas, valores repetidos deduplicados, sin coincidencias → `[]` y no 404, valor fuera del enum → 400, filtro vacío → 400 |
 | RF-15 | `GET /api/health` | integración: 200 y campo de estado de la base |

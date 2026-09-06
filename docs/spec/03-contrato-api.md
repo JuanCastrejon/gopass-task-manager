@@ -91,6 +91,15 @@ y el agregado de `/stats` trasladado a por-proyecto lo multiplicaba por 4,3.
 
 `dueDate` es una cadena en formato `YYYY-MM-DD` o `null`. Se almacena como columna `due_date date` en PostgreSQL (sin componente horario). Se descartó `timestamptz` debido al desfase horario de 5 horas entre el contenedor de base de datos/API (UTC) y los usuarios en Bogotá (America/Bogota, GMT-05:00): entre las 19:00 y las 23:59 locales una fecha con zona guardada a medianoche UTC se proyectaría en el día anterior. Con `date` y el type parser de `pg` configurado a string puro, la fecha viaja idéntica e inmutable para cualquier cliente.
 
+#### Ciclo de vida de `dueDate` en las operaciones de tareas:
+
+- **Crear (`POST /api/projects/:id/tasks`):**
+  Acepta `dueDate?: string | null` (opcional). Si se proporciona, debe cumplir el formato estricto `YYYY-MM-DD` y corresponder a una fecha real en el calendario (ej. `2026-02-31` es rechazado con `400 VALIDATION_ERROR`). Si se omite, la tarea nace con `dueDate: null`.
+- **Editar (`PATCH /api/tasks/:id`):**
+  Acepta `dueDate?: string | null`. Pasar una cadena válida `YYYY-MM-DD` actualiza la fecha; enviar `dueDate: null` de forma explícita elimina la fecha de vencimiento persistida. Formatos inválidos o días no válidos devuelven `400 VALIDATION_ERROR`.
+- **Listar (`GET /api/projects/:id/tasks`) y Detalle (`GET /api/tasks/:id`):**
+  Toda tarea incluye siempre el campo `dueDate: string | null`. Al ordenar la columna con `sort = 'due_asc'`, los resultados se presentan en orden cronológico ascendente con las tareas sin fecha al final (`ASC NULLS LAST`), protegido en la escalera de `CASE pc.sort` para garantizar la convivencia con ADR-024.
+
 El criterio de ordenación `due_asc` dentro de `project_columns.sort` ordena las tareas de la columna por fecha de vencimiento ascendente, situando las tareas sin fecha al final (`ASC NULLS LAST`), protegido dentro de la escalera de `CASE pc.sort` para preservar las garantías de ADR-024.
 
 `position` es un número fraccionario (`double precision`) que determina el orden manual dentro de la columna cuando esta tiene configurado `sort = 'manual'`. El cliente no calcula posiciones: para reordenar invoca `PATCH /api/tasks/:id/reorder` enviando `{ columnId, previousTaskId, nextTaskId }` y el servidor deriva el punto medio o el desplazamiento adecuado:
