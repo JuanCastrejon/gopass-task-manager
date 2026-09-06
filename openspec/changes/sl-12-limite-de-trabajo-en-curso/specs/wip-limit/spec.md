@@ -1,3 +1,14 @@
+> **Nota de revisión (SL-13).** El límite de trabajo en curso que describe este documento vivía en
+> el **proyecto** y se aplicaba solo a `IN_PROGRESS`. Con columnas configurables bajó a la
+> **columna**: «Desarrollo» máximo 3 y «QA» máximo 2 es una política real que un único límite por
+> proyecto no puede expresar. `projects.wip_limit` se retiró tras copiar su valor a la columna «En
+> curso» de cada proyecto, así que no se perdió ninguno.
+>
+> Todo lo que este documento decide sobre la concurrencia sigue vigente —la comprobación va dentro
+> de una transacción con `FOR UPDATE`, y la prueba falla si se quita el bloqueo—; lo único que
+> cambia es la fila que se bloquea. Se conserva íntegro: describe una decisión correcta en su
+> momento y la medición que la sostiene sigue siendo válida.
+
 ## ADDED Requirements
 
 ### Requirement: Un proyecto puede declarar cuánto trabajo simultáneo admite

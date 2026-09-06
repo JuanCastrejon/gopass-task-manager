@@ -40,9 +40,7 @@ Todas las actualizaciones de esta aplicación son parciales: cambiar el estado d
   "description": "Conexión con los concesionarios viales",
   "taskCount": 8,
   "doneCount": 3,
-  "inProgressCount": 2,
   "byPriority": { "LOW": 2, "MEDIUM": 3, "HIGH": 3 },
-  "wipLimit": 3,
   "progress": 38,
   "createdAt": "2026-09-04T14:02:11.482Z",
   "updatedAt": "2026-09-04T14:02:11.482Z"
@@ -55,11 +53,14 @@ saberse el dominio y a defenderse con `?? 0`. La tarjeta del panel la usa para s
 trabajo urgente, que es la pregunta que se hace desde un catálogo de proyectos; el desglose
 completo se consulta ya dentro del tablero, donde la tarea sí tiene prioridad propia.
 
-`wipLimit` es el máximo de tareas simultáneas en `IN_PROGRESS`, y `null` significa «sin límite».
-`inProgressCount` es su numerador. Superarlo devuelve **409 `WIP_LIMIT_REACHED`**, con el límite
-concreto en el `detail` para que el cliente no tenga que recalcularlo. La regla se impone dentro de
-una transacción que bloquea la fila del proyecto: sin ese bloqueo, dos peticiones simultáneas se la
-saltan entre las dos (ADR-022).
+El límite de trabajo en curso **no vive aquí**: es de cada columna del tablero. Ver
+`GET /api/projects/:projectId/columns`, cuyo recurso lleva `wipLimit`, `sort` y `taskCount`.
+Superarlo devuelve **409 `WIP_LIMIT_REACHED`** con el límite concreto en el `detail`, y la regla se
+impone dentro de una transacción que bloquea la fila de la columna destino: sin ese bloqueo, dos
+peticiones simultáneas se la saltan entre las dos (ADR-022, ADR-023).
+
+Una tarea lleva además `columnId`, y su `status` es siempre la categoría de esa columna. Las dos
+cosas viajan juntas por obligación de una clave foránea compuesta, así que no pueden divergir.
 
 En PostgreSQL los conteos son `COUNT(...) FILTER` colgados del `GROUP BY` que ya calculaba
 `taskCount` y `doneCount`; el objeto lo compone el mapper. Se descartó replicar aquí el `jsonb_object_agg` de
