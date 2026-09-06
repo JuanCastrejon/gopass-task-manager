@@ -26,12 +26,45 @@ pg.types.setTypeParser(1082, (val: string) => val);
  * Un único pool para todo el proceso. Los repositorios reciben este pool
  * o un cliente de transacción; ninguno abre conexiones por su cuenta.
  */
-export const pool = new pg.Pool({
-  connectionString: env.DATABASE_URL,
-  max: 10,
-  idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 5_000,
-});
+function resolvePoolConfig(): pg.PoolConfig {
+  const isProduction = env.NODE_ENV === 'production' || process.env.APP_ENV === 'production' || env.DATABASE_URL.includes('supabase.com');
+  if (isProduction) {
+    try {
+      const url = new URL(env.DATABASE_URL);
+      if (url.searchParams.get('sslmode') === 'require') {
+        url.searchParams.set('sslmode', 'no-verify');
+      }
+      return {
+        connectionString: url.toString(),
+        max: 10,
+        idleTimeoutMillis: 30_000,
+        connectionTimeoutMillis: 5_000,
+        ssl: { rejectUnauthorized: false },
+      };
+    } catch {
+      return {
+        connectionString: env.DATABASE_URL,
+        max: 10,
+        idleTimeoutMillis: 30_000,
+        connectionTimeoutMillis: 5_000,
+        ssl: { rejectUnauthorized: false },
+      };
+    }
+  }
+
+  return {
+    connectionString: env.DATABASE_URL,
+    max: 10,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
+  };
+}
+
+/**
+ * Un único pool para todo el proceso. Los repositorios reciben este pool
+ * o un cliente de transacción; ninguno abre conexiones por su cuenta.
+ */
+export const pool = new pg.Pool(resolvePoolConfig());
 
 pool.on('error', (err) => {
   console.error('Error inesperado en un cliente inactivo del pool:', err.message);
