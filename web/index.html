@@ -4,6 +4,35 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GoPass Task Manager</title>
+    <script>
+      /**
+       * Prevención de parpadeo (FOUC) ejecutada de forma síncrona antes del primer pintado.
+       *
+       * ¿Por qué localStorage aquí cuando el proyecto lo rechazó para el orden de columnas?
+       * El orden de las columnas en el tablero es configuración compartida del equipo
+       * (un cambio allí afecta a todas las personas que colaboran en el proyecto y debe
+       * persistir en la base de datos). El tema visual, en cambio, es estrictamente una
+       * preferencia ergonómica de cada navegador y dispositivo individual. Es la misma
+       * pregunta con respuesta contraria, y por eso merece quedar documentado.
+       *
+       * Si no hay preferencia explícita guardada (o está fijada en 'system'), se delega en
+       * la preferencia del sistema operativo mediante matchMedia('(prefers-color-scheme: dark)').
+       */
+      (function () {
+        try {
+          var temaGuardado = localStorage.getItem('theme');
+          var esOscuro =
+            temaGuardado === 'dark' ||
+            ((!temaGuardado || temaGuardado === 'system') &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var tema = esOscuro ? 'dark' : 'light';
+          document.documentElement.setAttribute('data-theme', tema);
+          document.documentElement.style.colorScheme = tema;
+        } catch (e) {
+          // Si el acceso a localStorage falla (e.g. cookies bloqueadas o navegación privada estricta), fallback silencioso.
+        }
+      })();
+    </script>
   </head>
   <body>
     <noscript>

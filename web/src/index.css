@@ -3,70 +3,163 @@
 /**
  * Tokens semánticos antes que utilidades.
  *
- * El riesgo de Tailwind es que la interfaz acabe pareciendo una plantilla.
- * Se mitiga decidiendo aquí el significado de cada color —qué es un estado,
- * qué es una prioridad— y componiendo con esos nombres, en vez de repartir
- * utilidades sueltas por el árbol de componentes.
+ * El significado de cada color se decide aquí en un único lugar.
+ * En modo oscuro no se usan modificadores `dark:` dispersos por componentes:
+ * se redefinen solo los seis tokens estructurales y se derivan las insignias con `color-mix`.
  */
+:root {
+  /* Tonos base compartidos para derivar variantes oscuras sin referencias circulares */
+  --base-priority-low: #4b5563;
+  --base-priority-medium: #1d4ed8;
+  --base-priority-high: #b91c1c;
+  --base-status-progress: #b45309;
+  --base-status-done: #047857;
+  --base-danger: #b91c1c;
+
+  --base-label-slate: #334155;
+  --base-label-red: #991b1b;
+  --base-label-orange: #9a3412;
+  --base-label-amber: #92400e;
+  --base-label-yellow: #854d0e;
+  --base-label-green: #166534;
+  --base-label-teal: #115e59;
+  --base-label-cyan: #155e75;
+  --base-label-blue: #1e40af;
+  --base-label-indigo: #3730a3;
+  --base-label-purple: #6b21a8;
+  --base-label-pink: #9d174d;
+}
+
 @theme {
+  /* Estructurales (tema claro por defecto) */
   --color-surface: #ffffff;
   --color-canvas: #f6f7f9;
   --color-border: #e3e6ea;
   --color-ink: #16191d;
   --color-ink-muted: #5d6672;
-
   --color-brand: #0b5fff;
-  --color-brand-soft: #e8f0ff;
+
+  /* Indicador de foco de anillo doble (WCAG 1.4.11 >= 3:1) */
+  --color-focus: var(--color-brand);
+  --color-focus-halo: #ffffff;
 
   /* Estados de tarea */
   --color-status-todo: #6b7280;
-  --color-status-todo-soft: #f1f3f5;
-  --color-status-progress: #b45309;
+  --color-status-progress: var(--base-status-progress);
   --color-status-progress-soft: #fef3c7;
-  --color-status-done: #047857;
+  --color-status-done: var(--base-status-done);
   --color-status-done-soft: #d1fae5;
 
   /* Prioridades */
-  --color-priority-low: #4b5563;
+  --color-priority-low: var(--base-priority-low);
   --color-priority-low-soft: #f1f3f5;
-  --color-priority-medium: #1d4ed8;
+  --color-priority-medium: var(--base-priority-medium);
   --color-priority-medium-soft: #dbeafe;
-  --color-priority-high: #b91c1c;
+  --color-priority-high: var(--base-priority-high);
   --color-priority-high-soft: #fee2e2;
 
-  --color-danger: #b91c1c;
+  --color-danger: var(--base-danger);
   --color-danger-soft: #fee2e2;
 
   /* Etiquetas de color (SL-18) — pares de tokens semánticos con contraste AA verificado */
-  --color-label-slate: #334155;
+  --color-label-slate: var(--base-label-slate);
   --color-label-slate-soft: #f1f5f9;
-  --color-label-red: #991b1b;
+  --color-label-red: var(--base-label-red);
   --color-label-red-soft: #fee2e2;
-  --color-label-orange: #9a3412;
+  --color-label-orange: var(--base-label-orange);
   --color-label-orange-soft: #ffedd5;
-  --color-label-amber: #92400e;
+  --color-label-amber: var(--base-label-amber);
   --color-label-amber-soft: #fef3c7;
-  --color-label-yellow: #854d0e;
+  --color-label-yellow: var(--base-label-yellow);
   --color-label-yellow-soft: #fef9c3;
-  --color-label-green: #166534;
+  --color-label-green: var(--base-label-green);
   --color-label-green-soft: #dcfce7;
-  --color-label-teal: #115e59;
+  --color-label-teal: var(--base-label-teal);
   --color-label-teal-soft: #ccfbf1;
-  --color-label-cyan: #155e75;
+  --color-label-cyan: var(--base-label-cyan);
   --color-label-cyan-soft: #cffafe;
-  --color-label-blue: #1e40af;
+  --color-label-blue: var(--base-label-blue);
   --color-label-blue-soft: #dbeafe;
-  --color-label-indigo: #3730a3;
+  --color-label-indigo: var(--base-label-indigo);
   --color-label-indigo-soft: #e0e7ff;
-  --color-label-purple: #6b21a8;
+  --color-label-purple: var(--base-label-purple);
   --color-label-purple-soft: #f3e8ff;
-  --color-label-pink: #9d174d;
+  --color-label-pink: var(--base-label-pink);
   --color-label-pink-soft: #fce7f3;
+}
+
+[data-theme="dark"] {
+  /* Controles nativos en modo oscuro */
+  color-scheme: dark;
+
+  /* Solo los SEIS estructurales redefinidos en oscuro */
+  --color-surface: #1a1d21;
+  --color-canvas: #121417;
+  --color-border: #2e343b;
+  --color-ink: #f6f7f9;
+  --color-ink-muted: #9ca3af;
+  --color-brand: #3b82f6;
+
+  /* 6 pares semánticos derivados sin nuevos hexadecimales */
+  --color-priority-low-soft: color-mix(in srgb, var(--base-priority-low) 18%, var(--color-surface));
+  --color-priority-low: color-mix(in srgb, white 50%, var(--base-priority-low));
+
+  --color-priority-medium-soft: color-mix(in srgb, var(--base-priority-medium) 18%, var(--color-surface));
+  --color-priority-medium: color-mix(in srgb, white 50%, var(--base-priority-medium));
+
+  --color-priority-high-soft: color-mix(in srgb, var(--base-priority-high) 18%, var(--color-surface));
+  --color-priority-high: color-mix(in srgb, white 50%, var(--base-priority-high));
+
+  --color-status-progress-soft: color-mix(in srgb, var(--base-status-progress) 18%, var(--color-surface));
+  --color-status-progress: color-mix(in srgb, white 50%, var(--base-status-progress));
+
+  --color-status-done-soft: color-mix(in srgb, var(--base-status-done) 18%, var(--color-surface));
+  --color-status-done: color-mix(in srgb, white 50%, var(--base-status-done));
+
+  --color-danger-soft: color-mix(in srgb, var(--base-danger) 18%, var(--color-surface));
+  --color-danger: color-mix(in srgb, white 50%, var(--base-danger));
+
+  /* 12 pares de etiquetas derivados sin nuevos hexadecimales */
+  --color-label-slate-soft: color-mix(in srgb, var(--base-label-slate) 18%, var(--color-surface));
+  --color-label-slate: color-mix(in srgb, white 50%, var(--base-label-slate));
+
+  --color-label-red-soft: color-mix(in srgb, var(--base-label-red) 18%, var(--color-surface));
+  --color-label-red: color-mix(in srgb, white 50%, var(--base-label-red));
+
+  --color-label-orange-soft: color-mix(in srgb, var(--base-label-orange) 18%, var(--color-surface));
+  --color-label-orange: color-mix(in srgb, white 50%, var(--base-label-orange));
+
+  --color-label-amber-soft: color-mix(in srgb, var(--base-label-amber) 18%, var(--color-surface));
+  --color-label-amber: color-mix(in srgb, white 50%, var(--base-label-amber));
+
+  --color-label-yellow-soft: color-mix(in srgb, var(--base-label-yellow) 18%, var(--color-surface));
+  --color-label-yellow: color-mix(in srgb, white 50%, var(--base-label-yellow));
+
+  --color-label-green-soft: color-mix(in srgb, var(--base-label-green) 18%, var(--color-surface));
+  --color-label-green: color-mix(in srgb, white 50%, var(--base-label-green));
+
+  --color-label-teal-soft: color-mix(in srgb, var(--base-label-teal) 18%, var(--color-surface));
+  --color-label-teal: color-mix(in srgb, white 50%, var(--base-label-teal));
+
+  --color-label-cyan-soft: color-mix(in srgb, var(--base-label-cyan) 18%, var(--color-surface));
+  --color-label-cyan: color-mix(in srgb, white 50%, var(--base-label-cyan));
+
+  --color-label-blue-soft: color-mix(in srgb, var(--base-label-blue) 18%, var(--color-surface));
+  --color-label-blue: color-mix(in srgb, white 50%, var(--base-label-blue));
+
+  --color-label-indigo-soft: color-mix(in srgb, var(--base-label-indigo) 18%, var(--color-surface));
+  --color-label-indigo: color-mix(in srgb, white 50%, var(--base-label-indigo));
+
+  --color-label-purple-soft: color-mix(in srgb, var(--base-label-purple) 18%, var(--color-surface));
+  --color-label-purple: color-mix(in srgb, white 50%, var(--base-label-purple));
+
+  --color-label-pink-soft: color-mix(in srgb, var(--base-label-pink) 18%, var(--color-surface));
+  --color-label-pink: color-mix(in srgb, white 50%, var(--base-label-pink));
 }
 
 @layer base {
   html {
-    color-scheme: light;
+    color-scheme: light dark;
   }
 
   body {
@@ -78,9 +171,10 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Foco visible: la interfaz debe ser operable con teclado (RNF-08). */
+  /* Foco visible: anillo doble con halo por fuera (RNF-08, WCAG 1.4.11). */
   :focus-visible {
-    outline: 2px solid var(--color-brand);
-    outline-offset: 2px;
+    outline: 2px solid var(--color-focus);
+    outline-offset: 0;
+    box-shadow: 0 0 0 4px var(--color-focus-halo);
   }
 }
