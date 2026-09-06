@@ -49,9 +49,9 @@ Todas las actualizaciones de esta aplicación son parciales: cambiar el estado d
 
 `byPriority` viaja en el listado y en el detalle, porque ambos salen de la misma consulta. Las tres
 claves están siempre presentes, también en 0: una clave ausente obligaría a cada consumidor a
-saberse el dominio y a defenderse con `?? 0`. El panel la usa para filtrar los proyectos que tienen
-al menos una tarea de una prioridad —un proyecto no tiene prioridad propia— y para explicar en la
-tarjeta por qué ese filtro la deja o la quita.
+saberse el dominio y a defenderse con `?? 0`. La tarjeta del panel la usa para señalar dónde hay
+trabajo urgente, que es la pregunta que se hace desde un catálogo de proyectos; el desglose
+completo se consulta ya dentro del tablero, donde la tarea sí tiene prioridad propia.
 
 En PostgreSQL son tres `COUNT(...) FILTER` colgados del `GROUP BY` que ya calculaba `taskCount` y
 `doneCount`; el objeto lo compone el mapper. Se descartó replicar aquí el `jsonb_object_agg` de

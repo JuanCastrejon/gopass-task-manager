@@ -38,7 +38,7 @@ test('arrastrar una tarjeta a otra columna cambia su estado y sobrevive a la rec
   await dialogo.getByLabel('Nombre').fill(proyecto);
   await dialogo.getByRole('button', { name: 'Crear proyecto' }).click();
 
-  await page.locator('article').filter({ hasText: proyecto }).getByRole('link', { name: 'Ver tareas' }).click();
+  await page.locator('article').filter({ hasText: proyecto }).getByRole('link', { name: /^Abrir tareas de/ }).click();
 
   const porHacer = page.getByRole('region', { name: 'Por hacer' });
   await porHacer.getByRole('button', { name: 'Añadir tarea a Por hacer' }).click();
@@ -75,7 +75,7 @@ test('soltar una tarjeta fuera de una columna la devuelve a su sitio', async ({ 
   await dialogo.getByLabel('Nombre').fill(proyecto);
   await dialogo.getByRole('button', { name: 'Crear proyecto' }).click();
 
-  await page.locator('article').filter({ hasText: proyecto }).getByRole('link', { name: 'Ver tareas' }).click();
+  await page.locator('article').filter({ hasText: proyecto }).getByRole('link', { name: /^Abrir tareas de/ }).click();
 
   const porHacer = page.getByRole('region', { name: 'Por hacer' });
   await porHacer.getByRole('button', { name: 'Añadir tarea a Por hacer' }).click();

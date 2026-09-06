@@ -1,5 +1,15 @@
 # Proposal: SL-10 — Filtros en el panel de proyectos
 
+> **Nota de revisión (SL-11).** Los chips de prioridad que describe este documento **se
+> retiraron** tras revisar la interfaz: un proyecto no tiene prioridad propia, así que el control
+> prometía una dimensión que la entidad no posee. Fuera del tablero solo queda el buscador por
+> nombre, como en Trello, Jira y Linear. El conteo `byPriority` **se conserva** en la API y ahora
+> alimenta una única señal de urgencia en la tarjeta. Ver
+> `openspec/changes/sl-11-tarjeta-pulsable-y-solo-busqueda/`.
+>
+> Este documento se conserva íntegro a propósito: describe lo que se decidió y por qué, y la
+> medición de SQL que contiene sigue siendo válida.
+
 ## Why
 
 El tablero de tareas tiene buscador y filtro por prioridad desde SL-06; el panel de proyectos, que es
