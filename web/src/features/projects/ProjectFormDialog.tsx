@@ -18,6 +18,10 @@ export function ProjectFormDialog({ open, onClose, project }: Props) {
   const editing = project !== undefined;
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  // Cadena y no número: un `<input type="number">` vacío da `''`, y `Number('')`
+  // es 0, que la API rechaza. Guardar el texto crudo mantiene distinguible
+  // «sin límite» de «límite cero».
+  const [wipLimit, setWipLimit] = useState('');
 
   const create = useCreateProject();
   const update = useUpdateProject(project?.id ?? '');
@@ -29,6 +33,7 @@ export function ProjectFormDialog({ open, onClose, project }: Props) {
     if (!open) return;
     setName(project?.name ?? '');
     setDescription(project?.description ?? '');
+    setWipLimit(project?.wipLimit != null ? String(project.wipLimit) : '');
     mutation.reset();
     // `mutation` cambia de identidad en cada render; depender de él aquí
     // reiniciaría el formulario mientras se escribe.
@@ -48,13 +53,24 @@ export function ProjectFormDialog({ open, onClose, project }: Props) {
     if (nombreVacio) return;
 
     const limpio = description.trim();
+    // Campo vacío significa «sin límite», que en el contrato es `null`.
+    const limite = wipLimit.trim() === '' ? null : Number(wipLimit);
+
     if (editing) {
       // En edición se envía `null` cuando la descripción se vació: el PATCH
-      // distingue "no lo toques" (ausente) de "bórralo" (null explícito).
-      update.mutate({ name: name.trim(), description: limpio === '' ? null : limpio }, { onSuccess: onClose });
+      // distingue "no lo toques" (ausente) de "bórralo" (null explícito). El
+      // límite sigue la misma regla.
+      update.mutate(
+        { name: name.trim(), description: limpio === '' ? null : limpio, wipLimit: limite },
+        { onSuccess: onClose },
+      );
     } else {
       create.mutate(
-        { name: name.trim(), ...(limpio === '' ? {} : { description: limpio }) },
+        {
+          name: name.trim(),
+          ...(limpio === '' ? {} : { description: limpio }),
+          ...(limite === null ? {} : { wipLimit: limite }),
+        },
         { onSuccess: onClose },
       );
     }
@@ -102,6 +118,33 @@ export function ProjectFormDialog({ open, onClose, project }: Props) {
                        outline-none focus:border-brand"
             placeholder="Qué abarca este proyecto"
           />
+        </div>
+
+        <div>
+          <label htmlFor="project-wip-limit" className="mb-1.5 block text-sm font-medium">
+            Límite de trabajo en curso <span className="font-normal text-ink-muted">(opcional)</span>
+          </label>
+          <input
+            id="project-wip-limit"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={100}
+            value={wipLimit}
+            onChange={(e) => setWipLimit(e.target.value)}
+            aria-invalid={errores['wipLimit'] !== undefined || undefined}
+            aria-describedby="project-wip-limit-ayuda"
+            className="w-28 rounded-lg border border-border bg-surface px-3 py-2 text-sm
+                       outline-none focus:border-brand"
+            placeholder="Sin límite"
+          />
+          {/* Explica la regla antes de que el usuario choque con el 409. */}
+          <p id="project-wip-limit-ayuda" className="mt-1 text-xs text-ink-muted">
+            Máximo de tareas simultáneas en «En curso». Déjalo vacío para no poner límite.
+          </p>
+          {errores['wipLimit'] && (
+            <p className="mt-1 text-xs text-danger">{errores['wipLimit']}</p>
+          )}
         </div>
 
         {/* Errores que no son de un campo concreto: el 409 de nombre repetido

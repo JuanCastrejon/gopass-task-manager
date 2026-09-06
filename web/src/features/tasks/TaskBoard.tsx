@@ -22,7 +22,14 @@ import { TaskCard } from './TaskCard.tsx';
 import { TaskFormDialog } from './TaskFormDialog.tsx';
 import { useDeleteTask, useTasks, useUpdateTask } from './api.ts';
 
-export function TaskBoard({ projectId }: { projectId: string }) {
+export function TaskBoard({
+  projectId,
+  wipLimit,
+}: {
+  projectId: string;
+  /** Límite de trabajo en curso del proyecto. `null` es «sin límite». */
+  wipLimit: number | null;
+}) {
   /**
    * Los filtros viven en la URL, no en `useState`: así el tablero filtrado
    * sobrevive a una recarga y se puede compartir por enlace. El hook los
@@ -250,9 +257,29 @@ export function TaskBoard({ projectId }: { projectId: string }) {
                   <h3 className="text-xs font-medium uppercase tracking-wide text-ink-muted">
                     {STATUS_LABEL[estado]}
                   </h3>
-                  <span className="ml-auto text-xs tabular-nums text-ink-muted">
-                    {columna.length}
-                  </span>
+                  {/*
+                    El límite se muestra solo en «En curso», que es la única
+                    columna donde significa algo: «Por hacer» es la cola de
+                    entrada y «Completada» el archivo. Un contador «2/3» junto a
+                    la columna limitada es la forma en que un tablero kanban
+                    hace visible el cuello de botella antes de chocar con él.
+                  */}
+                  {estado === 'IN_PROGRESS' && wipLimit !== null ? (
+                    <span
+                      className={`ml-auto rounded px-1.5 py-0.5 text-xs font-medium tabular-nums ${
+                        columna.length >= wipLimit
+                          ? 'bg-danger-soft text-danger'
+                          : 'text-ink-muted'
+                      }`}
+                      title={`${columna.length} de un máximo de ${wipLimit} en curso`}
+                    >
+                      {columna.length}/{wipLimit}
+                    </span>
+                  ) : (
+                    <span className="ml-auto text-xs tabular-nums text-ink-muted">
+                      {columna.length}
+                    </span>
+                  )}
                 </header>
 
                 {/* Altura mínima para que una columna vacía no colapse y

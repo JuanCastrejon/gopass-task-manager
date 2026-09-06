@@ -12,6 +12,7 @@ export const ERROR_CODES = {
   TASK_NOT_FOUND: 'TASK_NOT_FOUND',
   PROJECT_NAME_TAKEN: 'PROJECT_NAME_TAKEN',
   PROJECT_HAS_TASKS: 'PROJECT_HAS_TASKS',
+  WIP_LIMIT_REACHED: 'WIP_LIMIT_REACHED',
   ROUTE_NOT_FOUND: 'ROUTE_NOT_FOUND',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
 } as const;
@@ -73,6 +74,25 @@ export class ProjectHasTasksError extends AppError {
   constructor(cause?: unknown) {
     super(409, ERROR_CODES.PROJECT_HAS_TASKS,
       'No se puede eliminar un proyecto que todavía tiene tareas. Elimínalas primero.',
+      cause !== undefined ? { cause } : undefined);
+  }
+}
+
+/**
+ * El límite de trabajo en curso está lleno.
+ *
+ * Es un 409 y no un 400: el payload es válido y la operación sería legal en
+ * otro momento. Lo que impide moverla es el estado del tablero, igual que en
+ * el 409 de borrar un proyecto con tareas.
+ *
+ * El mensaje dice el número y qué hacer, porque un límite alcanzado no es un
+ * fallo del usuario sino la señal que el método kanban quiere producir:
+ * termina algo antes de empezar otra cosa.
+ */
+export class WipLimitReachedError extends AppError {
+  constructor(limite: number, cause?: unknown) {
+    super(409, ERROR_CODES.WIP_LIMIT_REACHED,
+      `El límite de trabajo en curso es de ${limite} ${limite === 1 ? 'tarea' : 'tareas'}. Termina o devuelve alguna antes de empezar otra.`,
       cause !== undefined ? { cause } : undefined);
   }
 }

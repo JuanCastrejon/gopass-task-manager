@@ -4,7 +4,7 @@ import { ProjectHasTasksError, ProjectNotFoundError } from '../../http/errors.js
 import type { ProjectRow, ProjectSummaryRow } from './projects.mapper.js';
 import type { CreateProjectInput, PatchProjectInput } from './projects.schema.js';
 
-const PROJECT_FIELDS = 'id, name, description, created_at, updated_at';
+const PROJECT_FIELDS = 'id, name, description, wip_limit, created_at, updated_at';
 
 /**
  * `COUNT(*)` devuelve `bigint`, y el driver `pg` entrega los `bigint` como
@@ -32,9 +32,10 @@ const PROJECT_FIELDS = 'id, name, description, created_at, updated_at';
  * convierte en 0 el NULL del proyecto sin tareas.
  */
 const SUMMARY_QUERY = `
-  SELECT p.id, p.name, p.description, p.created_at, p.updated_at,
+  SELECT p.id, p.name, p.description, p.wip_limit, p.created_at, p.updated_at,
          COALESCE(t.total, 0)::int         AS task_count,
          COALESCE(t.done,  0)::int         AS done_count,
+         COALESCE(t.in_progress, 0)::int   AS in_progress_count,
          COALESCE(t.low,    0)::int        AS low_count,
          COALESCE(t.medium, 0)::int        AS medium_count,
          COALESCE(t.high,   0)::int        AS high_count,
@@ -46,6 +47,7 @@ const SUMMARY_QUERY = `
     SELECT project_id,
            COUNT(t.id)                                        AS total,
            COUNT(t.id) FILTER (WHERE t.status = 'DONE')       AS done,
+           COUNT(t.id) FILTER (WHERE t.status = 'IN_PROGRESS') AS in_progress,
            COUNT(t.id) FILTER (WHERE t.priority = 'LOW')      AS low,
            COUNT(t.id) FILTER (WHERE t.priority = 'MEDIUM')   AS medium,
            COUNT(t.id) FILTER (WHERE t.priority = 'HIGH')     AS high
@@ -74,10 +76,10 @@ export async function findProjectById(id: string): Promise<ProjectSummaryRow> {
 export async function createProject(input: CreateProjectInput): Promise<ProjectRow> {
   try {
     const result = await pool.query<ProjectRow>(
-      `INSERT INTO projects (name, description)
-       VALUES ($1, $2)
+      `INSERT INTO projects (name, description, wip_limit)
+       VALUES ($1, $2, $3)
        RETURNING ${PROJECT_FIELDS}`,
-      [input.name, input.description ?? null],
+      [input.name, input.description ?? null, input.wipLimit ?? null],
     );
     // `INSERT ... RETURNING` siempre devuelve la fila creada o lanza.
     return result.rows[0]!;
@@ -97,7 +99,7 @@ export async function createProject(input: CreateProjectInput): Promise<ProjectR
  * `COALESCE`, `null` significa "no lo toques" y no queda forma de expresar
  * "déjalo vacío".
  */
-const UPDATABLE = { name: 'name', description: 'description' } as const;
+const UPDATABLE = { name: 'name', description: 'description', wipLimit: 'wip_limit' } as const;
 
 export async function updateProject(id: string, patch: PatchProjectInput): Promise<ProjectRow> {
   const assignments: string[] = [];

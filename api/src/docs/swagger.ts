@@ -333,6 +333,15 @@ export const openApiSpec = {
               },
             },
           },
+          409: {
+            description:
+              'El proyecto tiene un limite de trabajo en curso y esta lleno (WIP_LIMIT_REACHED)',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
           400: {
             description: 'Payload inválido o campo completedAt no permitido',
             content: {
@@ -419,6 +428,15 @@ export const openApiSpec = {
               },
             },
           },
+          409: {
+            description:
+              'El proyecto tiene un limite de trabajo en curso y esta lleno (WIP_LIMIT_REACHED)',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
           400: {
             description: 'Payload inválido o campo completedAt no permitido',
             content: {
@@ -495,6 +513,15 @@ export const openApiSpec = {
           id: { type: 'string', format: 'uuid' },
           name: { type: 'string', example: 'Telepeaje — integración de operadores' },
           description: { type: 'string', nullable: true, example: 'Conexión con concesionarios viales' },
+          wipLimit: {
+            type: 'integer',
+            nullable: true,
+            minimum: 1,
+            maximum: 100,
+            description:
+              'Maximo de tareas simultaneas en IN_PROGRESS. null = sin limite. Superarlo devuelve 409 WIP_LIMIT_REACHED.',
+            example: 3,
+          },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
@@ -504,10 +531,15 @@ export const openApiSpec = {
           { $ref: '#/components/schemas/Project' },
           {
             type: 'object',
-            required: ['taskCount', 'doneCount', 'byPriority', 'progress'],
+            required: ['taskCount', 'doneCount', 'inProgressCount', 'byPriority', 'progress'],
             properties: {
               taskCount: { type: 'integer', example: 4 },
               doneCount: { type: 'integer', example: 1 },
+              inProgressCount: {
+                type: 'integer',
+                description: 'Tareas ahora mismo en IN_PROGRESS. Es el numerador de wipLimit.',
+                example: 1,
+              },
               byPriority: {
                 type: 'object',
                 description:
@@ -530,6 +562,7 @@ export const openApiSpec = {
         properties: {
           name: { type: 'string', minLength: 1, maxLength: 120, example: 'App de parqueaderos' },
           description: { type: 'string', maxLength: 2000, nullable: true, example: 'Flujo de pago' },
+          wipLimit: { type: 'integer', nullable: true, minimum: 1, maximum: 100, example: 3 },
         },
       },
       PatchProjectInput: {
@@ -537,6 +570,8 @@ export const openApiSpec = {
         properties: {
           name: { type: 'string', minLength: 1, maxLength: 120, example: 'Nuevo nombre' },
           description: { type: 'string', maxLength: 2000, nullable: true, example: null },
+          // `null` explicito retira el limite; ausente lo deja como estaba.
+          wipLimit: { type: 'integer', nullable: true, minimum: 1, maximum: 100, example: 3 },
         },
       },
       Task: {

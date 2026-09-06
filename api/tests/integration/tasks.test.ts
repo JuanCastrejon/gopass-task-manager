@@ -317,3 +317,129 @@ describe('GET y DELETE /api/tasks/:id', () => {
     expect(res.body.code).toBe('TASK_NOT_FOUND');
   });
 });
+
+/**
+ * Límite de trabajo en curso (WIP).
+ *
+ * Es la única regla del método kanban que el tablero impone de verdad, así que
+ * se prueba contra PostgreSQL real: lo que hay que demostrar no es que un `if`
+ * de JavaScript funcione, sino que dos peticiones simultáneas no puedan
+ * saltárselo. Eso solo se ve con una base de datos de verdad.
+ */
+describe('límite de trabajo en curso', () => {
+  const ponerLimite = (limite: number | null) =>
+    request(app).patch(`/api/projects/${projectId}`).send({ wipLimit: limite });
+
+  const mover = (id: string, status: string) =>
+    request(app).patch(`/api/tasks/${id}`).send({ status });
+
+  it('sin límite declarado no impone nada', async () => {
+    const tareas = await Promise.all([crearTarea(), crearTarea(), crearTarea()]);
+    for (const { body } of tareas) {
+      expect((await mover(body.id, 'IN_PROGRESS')).status).toBe(200);
+    }
+  });
+
+  it('rechaza con 409 la tarea que supera el límite, y explica cuánto es', async () => {
+    await ponerLimite(2);
+    const { body: a } = await crearTarea({ title: 'a' });
+    const { body: b } = await crearTarea({ title: 'b' });
+    const { body: c } = await crearTarea({ title: 'c' });
+
+    expect((await mover(a.id, 'IN_PROGRESS')).status).toBe(200);
+    expect((await mover(b.id, 'IN_PROGRESS')).status).toBe(200);
+
+    const rechazada = await mover(c.id, 'IN_PROGRESS');
+    expect(rechazada.status).toBe(409);
+    expect(rechazada.body.code).toBe('WIP_LIMIT_REACHED');
+    // El mensaje dice el número: un límite alcanzado sin cifra no es accionable.
+    expect(rechazada.body.detail).toContain('2');
+
+    // Y la tarea sigue donde estaba: el 409 no deja a medias.
+    const { body: sinMover } = await request(app).get(`/api/tasks/${c.id}`);
+    expect(sinMover.status).toBe('TODO');
+  });
+
+  it('crear una tarea directamente en curso consume el mismo cupo', async () => {
+    await ponerLimite(1);
+    expect((await crearTarea({ title: 'primera', status: 'IN_PROGRESS' })).status).toBe(201);
+
+    const segunda = await crearTarea({ title: 'segunda', status: 'IN_PROGRESS' });
+    expect(segunda.status).toBe(409);
+    expect(segunda.body.code).toBe('WIP_LIMIT_REACHED');
+  });
+
+  it('editar una tarea que ya está en curso no la cuenta dos veces', async () => {
+    await ponerLimite(1);
+    const { body: unica } = await crearTarea({ status: 'IN_PROGRESS' });
+
+    // Con el tablero lleno, reenviar su mismo estado o corregir el título tiene
+    // que seguir funcionando: si no, el límite sería una trampa que impide
+    // arreglar una errata.
+    expect((await mover(unica.id, 'IN_PROGRESS')).status).toBe(200);
+    const editada = await request(app).patch(`/api/tasks/${unica.id}`).send({ title: 'Título corregido' });
+    expect(editada.status).toBe(200);
+  });
+
+  it('sacar una tarea de en curso libera el hueco', async () => {
+    await ponerLimite(1);
+    const { body: a } = await crearTarea({ title: 'a', status: 'IN_PROGRESS' });
+    const { body: b } = await crearTarea({ title: 'b' });
+
+    expect((await mover(b.id, 'IN_PROGRESS')).status).toBe(409);
+    expect((await mover(a.id, 'DONE')).status).toBe(200);
+    expect((await mover(b.id, 'IN_PROGRESS')).status).toBe(200);
+  });
+
+  it('quitar el límite con null vuelve a dejar pasar todo', async () => {
+    await ponerLimite(1);
+    const { body: a } = await crearTarea({ title: 'a', status: 'IN_PROGRESS' });
+    const { body: b } = await crearTarea({ title: 'b' });
+    expect((await mover(b.id, 'IN_PROGRESS')).status).toBe(409);
+
+    expect((await ponerLimite(null)).status).toBe(200);
+    expect((await mover(b.id, 'IN_PROGRESS')).status).toBe(200);
+    expect(a.id).toBeTruthy();
+  });
+
+  it('un límite de 0 o negativo se rechaza con 400', async () => {
+    expect((await ponerLimite(0)).status).toBe(400);
+    expect((await ponerLimite(-3)).status).toBe(400);
+  });
+
+  /**
+   * La prueba que justifica el `FOR UPDATE`.
+   *
+   * Con un solo hueco libre y dos peticiones lanzadas a la vez, sin bloqueo las
+   * dos leen «0 en curso», las dos concluyen que cabe y las dos entran: el
+   * tablero acabaría con 2 tareas en curso y un límite de 1. Se comprobó que
+   * esto es exactamente lo que ocurre al quitar el `FOR UPDATE`.
+   */
+  it('dos movimientos simultáneos no se saltan el límite entre los dos', async () => {
+    await ponerLimite(1);
+    const { body: a } = await crearTarea({ title: 'a' });
+    const { body: b } = await crearTarea({ title: 'b' });
+
+    const resultados = await Promise.all([
+      mover(a.id, 'IN_PROGRESS'),
+      mover(b.id, 'IN_PROGRESS'),
+    ]);
+
+    const codigos = resultados.map((r) => r.status).sort();
+    expect(codigos).toEqual([200, 409]);
+
+    const { body: enCurso } = await request(app).get(
+      `/api/projects/${projectId}/tasks?status=IN_PROGRESS`,
+    );
+    expect(enCurso).toHaveLength(1);
+  });
+
+  it('el resumen del proyecto expone el límite y cuántas van en curso', async () => {
+    await ponerLimite(3);
+    const { body: t } = await crearTarea({ status: 'IN_PROGRESS' });
+    expect(t.status).toBe('IN_PROGRESS');
+
+    const { body: proyecto } = await request(app).get(`/api/projects/${projectId}`);
+    expect(proyecto).toMatchObject({ wipLimit: 3, inProgressCount: 1 });
+  });
+});
