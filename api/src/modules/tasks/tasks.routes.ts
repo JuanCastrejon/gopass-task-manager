@@ -14,6 +14,7 @@ import {
   type PatchTaskInput,
   type ReorderTaskInput,
 } from './tasks.schema.js';
+import { setTaskLabelsSchema, type SetTaskLabelsInput } from '../labels/labels.schema.js';
 
 /**
  * Rutas anidadas bajo el proyecto, con `mergeParams` para poder leer
@@ -34,7 +35,7 @@ projectTasksRouter.get(
   (req, res, next) => {
     repo
       .listTasksByProject(req.params['projectId'] as string, parsedQuery<typeof listTasksQuerySchema>(res) as ListTasksQuery)
-      .then((rows) => res.json(rows.map(toTask)))
+      .then((rows) => res.json(rows.map((row) => toTask(row))))
       .catch(next);
   },
 );
@@ -79,6 +80,18 @@ tasksRouter.patch(
   (req, res, next) => {
     repo
       .reorderTask(req.params['id'] as string, req.body as ReorderTaskInput)
+      .then((row) => res.json(toTask(row)))
+      .catch(next);
+  },
+);
+
+tasksRouter.put(
+  '/:id/labels',
+  validateParams(taskIdParamsSchema),
+  validateBody(setTaskLabelsSchema),
+  (req, res, next) => {
+    repo
+      .setTaskLabels(req.params['id'] as string, (req.body as SetTaskLabelsInput).labelIds)
       .then((row) => res.json(toTask(row)))
       .catch(next);
   },

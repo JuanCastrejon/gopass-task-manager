@@ -260,6 +260,32 @@ describe('DELETE /api/projects/:id — la decisión de diseño del proyecto', ()
     expect((await request(app).get(`/api/projects/${creado.id}`)).status).toBe(200);
   });
 
+  it('las etiquetas se van con el proyecto: sin tareas, el borrado es 204 y no 500', async () => {
+    // Regresión de SL-18. La migración 0009 declaró `labels.project_id` con
+    // ON DELETE RESTRICT, copiando lo que hace `tasks`. Un proyecto con una
+    // etiqueta y ninguna tarea devolvía 500, porque el traductor de errores
+    // solo reconoce el 23503 de `tasks_project_id_fkey` y esta era otra
+    // foránea distinta. La 0010 lo corrige pasándola a CASCADE: una etiqueta
+    // es configuración del proyecto, como una columna, no contenido a
+    // proteger. Lo protegido siguen siendo las tareas.
+    const { body: creado } = await crearProyecto();
+    const { pool } = await import('../../src/db/pool.js');
+    await pool.query(`INSERT INTO labels (project_id, name, color) VALUES ($1, 'Urgente', 'red')`, [
+      creado.id,
+    ]);
+
+    const res = await request(app).delete(`/api/projects/${creado.id}`);
+
+    expect(res.status).toBe(204);
+    expect((await request(app).get(`/api/projects/${creado.id}`)).status).toBe(404);
+
+    // Y la etiqueta se fue con él, sin dejar filas huérfanas.
+    const huerfanas = await pool.query('SELECT count(*)::int AS n FROM labels WHERE project_id = $1', [
+      creado.id,
+    ]);
+    expect(huerfanas.rows[0].n).toBe(0);
+  });
+
   it('404 —y no 409— cuando el proyecto ni siquiera existe', async () => {
     const res = await request(app).delete('/api/projects/00000000-0000-4000-8000-000000000000');
     expect(res.status).toBe(404);

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Modal } from '../../components/ui/Modal.tsx';
 import { Button } from '../../components/ui/Button.tsx';
-import { PRIORITY_LABEL } from '../../components/ui/Badge.tsx';
+import { LABEL_STYLE, PRIORITY_LABEL } from '../../components/ui/Badge.tsx';
 import { fieldErrors, messageFor } from '../../lib/error-messages.ts';
 import {
   TASK_PRIORITIES,
@@ -9,6 +9,7 @@ import {
   type Task,
   type TaskPriority,
 } from '../../types/api.ts';
+import { useLabels, useSetTaskLabels } from '../labels/api.ts';
 import { useCreateTask, useUpdateTask } from './api.ts';
 import { evaluarCompletado } from './due-date.ts';
 
@@ -38,7 +39,10 @@ export function TaskFormDialog({
   const [columnId, setColumnId] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('MEDIUM');
   const [dueDate, setDueDate] = useState('');
+  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
 
+  const { data: labels = [] } = useLabels(projectId);
+  const setTaskLabels = useSetTaskLabels();
   const create = useCreateTask(projectId);
   const update = useUpdateTask();
   const mutation = editing ? update : create;
@@ -50,20 +54,19 @@ export function TaskFormDialog({
     setColumnId(task?.columnId ?? defaultColumnId ?? columnas[0]?.id ?? '');
     setPriority(task?.priority ?? 'MEDIUM');
     setDueDate(task?.dueDate ?? '');
+    setSelectedLabelIds(task?.labels?.map((l) => l.id) ?? []);
     mutation.reset();
+    setTaskLabels.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, task?.id, defaultColumnId]);
 
   const errores = fieldErrors(mutation.error);
   const tituloVacio = title.trim().length === 0;
+  const submitting = mutation.isPending || setTaskLabels.isPending;
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    // `isPending` tarda un ciclo de render en deshabilitar el botón, así que un
-    // doble clic rápido enviaba dos peticiones: la primera creaba el recurso y
-    // la segunda chocaba con el índice único y devolvía un 409 desconcertante
-    // sobre algo que en realidad sí se había guardado.
-    if (mutation.isPending) return;
+    if (submitting) return;
     if (tituloVacio) return;
 
     const limpio = description.trim();
@@ -79,7 +82,14 @@ export function TaskFormDialog({
             dueDate: dueDate === '' ? null : dueDate,
           },
         },
-        { onSuccess: onClose },
+        {
+          onSuccess: (updatedTask) => {
+            setTaskLabels.mutate(
+              { taskId: updatedTask.id, labelIds: [] },
+              { onSuccess: onClose },
+            );
+          },
+        },
       );
     } else {
       create.mutate(
@@ -90,7 +100,18 @@ export function TaskFormDialog({
           dueDate: dueDate === '' ? null : dueDate,
           ...(limpio === '' ? {} : { description: limpio }),
         },
-        { onSuccess: onClose },
+        {
+          onSuccess: (createdTask) => {
+            if (selectedLabelIds.length > 0) {
+              setTaskLabels.mutate(
+                { taskId: createdTask.id, labelIds: selectedLabelIds },
+                { onSuccess: onClose },
+              );
+            } else {
+              onClose();
+            }
+          },
+        },
       );
     }
   }
@@ -211,9 +232,50 @@ export function TaskFormDialog({
           {errores['dueDate'] && <p className="mt-1 text-xs text-danger">{errores['dueDate']}</p>}
         </div>
 
-        {mutation.isError && Object.keys(errores).length === 0 && (
+        <div>
+          <span className="mb-1.5 block text-sm font-medium">
+            Etiquetas <span className="font-normal text-ink-muted">(opcional)</span>
+          </span>
+          {labels.length === 0 ? (
+            <p className="text-xs text-ink-muted">No hay etiquetas creadas en este proyecto.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Seleccionar etiquetas">
+              {labels.map((lbl) => {
+                const seleccionada = selectedLabelIds.includes(lbl.id);
+                return (
+                  <button
+                    key={lbl.id}
+                    type="button"
+                    role="checkbox"
+                    aria-checked={seleccionada}
+                    onClick={() => {
+                      setSelectedLabelIds((prev) =>
+                        seleccionada ? prev.filter((id) => id !== lbl.id) : [...prev, lbl.id],
+                      );
+                    }}
+                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
+                      seleccionada
+                        ? `${LABEL_STYLE[lbl.color]} ring-2 ring-brand ring-offset-1`
+                        : 'border border-border bg-surface text-ink-muted hover:bg-canvas'
+                    }`}
+                  >
+                    <span
+                      className={`size-2 rounded-full ${
+                        seleccionada ? 'bg-current' : 'border border-ink-muted/40'
+                      }`}
+                      aria-hidden
+                    />
+                    <span>{lbl.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {(mutation.isError || setTaskLabels.isError) && Object.keys(errores).length === 0 && (
           <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
-            {messageFor(mutation.error)}
+            {messageFor(mutation.error ?? setTaskLabels.error)}
           </p>
         )}
 
@@ -221,7 +283,7 @@ export function TaskFormDialog({
           <Button variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
-          <Button type="submit" variant="primary" loading={mutation.isPending} disabled={tituloVacio}>
+          <Button type="submit" variant="primary" loading={submitting} disabled={tituloVacio}>
             {editing ? 'Guardar cambios' : 'Crear tarea'}
           </Button>
         </div>

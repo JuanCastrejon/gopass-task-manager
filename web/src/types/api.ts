@@ -14,6 +14,66 @@ export const TASK_STATUSES: readonly TaskStatus[] = ['TODO', 'IN_PROGRESS', 'DON
 export const TASK_PRIORITIES: readonly TaskPriority[] = ['LOW', 'MEDIUM', 'HIGH'];
 
 /**
+ * 12 fichas de color semánticas para etiquetas por proyecto (SL-18).
+ * Paleta fija y deliberada con contraste AA verificado (>= 4.5:1).
+ */
+export const LABEL_COLORS = [
+  'slate',
+  'red',
+  'orange',
+  'amber',
+  'yellow',
+  'green',
+  'teal',
+  'cyan',
+  'blue',
+  'indigo',
+  'purple',
+  'pink',
+] as const;
+
+export type LabelColor = (typeof LABEL_COLORS)[number];
+
+export const LABEL_COLOR_NAMES: Record<LabelColor, string> = {
+  slate: 'Pizarra',
+  red: 'Rojo',
+  orange: 'Naranja',
+  amber: 'Ámbar',
+  yellow: 'Amarillo',
+  green: 'Verde',
+  teal: 'Turquesa',
+  cyan: 'Cian',
+  blue: 'Azul',
+  indigo: 'Índigo',
+  purple: 'Púrpura',
+  pink: 'Rosa',
+};
+
+export interface Label {
+  id: string;
+  projectId: string;
+  name: string;
+  color: LabelColor;
+  taskCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateLabelInput {
+  name: string;
+  color: LabelColor;
+}
+
+export interface PatchLabelInput {
+  name?: string;
+  color?: LabelColor;
+}
+
+export interface SetTaskLabelsInput {
+  labelIds: string[];
+}
+
+/**
  * Criterios de orden de una columna. El orden es configuración del tablero y
  * no preferencia de cada navegador: se guarda en la columna, así que todo el
  * equipo ve lo mismo y sobrevive a cambiar de equipo.
@@ -111,6 +171,8 @@ export interface Task {
   dueDate: string | null;
   /** Lo sella la base en la transición a DONE. La API rechaza escribirlo. */
   completedAt: string | null;
+  /** Etiquetas asignadas a la tarea (SL-18). */
+  labels?: Label[];
   createdAt: string;
   updatedAt: string;
 }

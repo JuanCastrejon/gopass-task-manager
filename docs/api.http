@@ -303,6 +303,83 @@ Content-Type: application/json
 }
 
 
+### ─────────────── etiquetas de color (SL-18) ───────────────
+
+### Listar etiquetas del proyecto (inicialmente vacío)
+GET {{host}}/projects/{{projectId}}/labels
+
+### Crear una etiqueta en el proyecto
+# @name crearEtiquetaUrgente
+POST {{host}}/projects/{{projectId}}/labels
+Content-Type: application/json
+
+{
+  "name": "Urgente",
+  "color": "red"
+}
+
+@labelIdUrgente = {{crearEtiquetaUrgente.response.body.id}}
+
+### Crear una segunda etiqueta
+# @name crearEtiquetaBackend
+POST {{host}}/projects/{{projectId}}/labels
+Content-Type: application/json
+
+{
+  "name": "Backend",
+  "color": "indigo"
+}
+
+@labelIdBackend = {{crearEtiquetaBackend.response.body.id}}
+
+### Nombre duplicado ignorando mayúsculas y espacios → 409 LABEL_NAME_TAKEN
+POST {{host}}/projects/{{projectId}}/labels
+Content-Type: application/json
+
+{
+  "name": "  urgente  ",
+  "color": "amber"
+}
+
+### Color no permitido (fuera de la paleta cerrada de 12) → 400 VALIDATION_ERROR
+POST {{host}}/projects/{{projectId}}/labels
+Content-Type: application/json
+
+{
+  "name": "Inválida",
+  "color": "magenta"
+}
+
+### Actualización parcial de una etiqueta (nombre o color)
+PATCH {{host}}/labels/{{labelIdUrgente}}
+Content-Type: application/json
+
+{
+  "name": "Muy Urgente",
+  "color": "orange"
+}
+
+### Asignar etiquetas a una tarea (reemplazo atómico vía PUT idempotente)
+PUT {{host}}/tasks/{{taskId}}/labels
+Content-Type: application/json
+
+{
+  "labelIds": ["{{labelIdUrgente}}", "{{labelIdBackend}}"]
+}
+
+### Filtrar tareas por una o más etiquetas (repetible)
+GET {{host}}/projects/{{projectId}}/tasks?labels={{labelIdUrgente}}&labels={{labelIdBackend}}
+
+### Intentar borrar una etiqueta asignada sin confirmación → 409 LABEL_HAS_TASKS
+DELETE {{host}}/labels/{{labelIdUrgente}}
+
+### Borrar etiqueta asignada confirmando eliminación en cascada de asignaciones → 204
+DELETE {{host}}/labels/{{labelIdUrgente}}?confirm=true
+
+### Borrar etiqueta libre de asignaciones → 204
+DELETE {{host}}/labels/{{labelIdBackend}}
+
+
 ### ─────────────── LA decisión de diseño ───────────────
 
 ### Borrar el proyecto con la tarea dentro → 409 PROJECT_HAS_TASKS

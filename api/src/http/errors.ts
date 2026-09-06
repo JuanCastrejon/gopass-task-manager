@@ -17,6 +17,9 @@ export const ERROR_CODES = {
   COLUMN_HAS_TASKS: 'COLUMN_HAS_TASKS',
   COLUMN_NAME_TAKEN: 'COLUMN_NAME_TAKEN',
   LAST_COLUMN_OF_CATEGORY: 'LAST_COLUMN_OF_CATEGORY',
+  LABEL_NOT_FOUND: 'LABEL_NOT_FOUND',
+  LABEL_NAME_TAKEN: 'LABEL_NAME_TAKEN',
+  LABEL_HAS_TASKS: 'LABEL_HAS_TASKS',
   ROUTE_NOT_FOUND: 'ROUTE_NOT_FOUND',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
 } as const;
@@ -141,5 +144,33 @@ export class LastColumnOfCategoryError extends AppError {
     super(409, ERROR_CODES.LAST_COLUMN_OF_CATEGORY,
       `Es la última columna de tipo "${categoria}" del proyecto. Crea otra equivalente antes de eliminarla.`,
       cause !== undefined ? { cause } : undefined);
+  }
+}
+
+export class LabelNotFoundError extends AppError {
+  constructor(id: string, cause?: unknown) {
+    super(404, ERROR_CODES.LABEL_NOT_FOUND, `No existe una etiqueta con id ${id}.`,
+      cause !== undefined ? { cause } : undefined);
+  }
+}
+
+export class LabelNameTakenError extends AppError {
+  constructor(name: string, cause?: unknown) {
+    super(409, ERROR_CODES.LABEL_NAME_TAKEN, `Ya existe una etiqueta llamada "${name}" en este proyecto.`,
+      cause !== undefined ? { cause } : undefined);
+  }
+}
+
+/**
+ * Borrar una etiqueta en uso sin confirmación explícita devuelve 409 con el número de tareas afectadas.
+ */
+export class LabelHasTasksError extends AppError {
+  readonly taskCount: number;
+
+  constructor(tareas: number, cause?: unknown) {
+    super(409, ERROR_CODES.LABEL_HAS_TASKS,
+      `Esta etiqueta todavía está asignada a ${tareas} ${tareas === 1 ? 'tarea' : 'tareas'}. Confirma la eliminación para desasignarla y borrarla.`,
+      cause !== undefined ? { cause } : undefined);
+    this.taskCount = tareas;
   }
 }

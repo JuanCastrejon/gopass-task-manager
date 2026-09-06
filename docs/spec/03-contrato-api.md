@@ -19,12 +19,21 @@ Base: `/api`. Contenido: `application/json`. Errores: `application/problem+json`
 | PATCH | `/api/tasks/:id` | Actualización parcial (incluye cambio de estado) | 200 |
 | PATCH | `/api/tasks/:id/reorder` | Reordenar tarea dentro o entre columnas | 200 |
 | DELETE | `/api/tasks/:id` | Eliminar tarea | 204 |
+| GET | `/api/projects/:id/labels` | Listar etiquetas de un proyecto (SL-18) | 200 |
+| POST | `/api/projects/:id/labels` | Crear etiqueta en el proyecto | 201 |
+| PATCH | `/api/labels/:id` | Actualización de etiqueta | 200 |
+| DELETE | `/api/labels/:id` | Eliminar etiqueta (admite confirmación ?confirm=true) | 204 |
+| PUT | `/api/tasks/:id/labels` | Reemplazar conjunto completo de etiquetas de una tarea | 200 |
 
-Trece endpoints. No cuarenta.
+Dieciocho endpoints bien justificados.
 
-### Por qué `PATCH` y no `PUT`
+### Por qué `PATCH` para recursos y `PUT` para la colección de etiquetas de la tarea
 
-Todas las actualizaciones de esta aplicación son parciales: cambiar el estado de una tarea no debe obligar al cliente a reenviar título, descripción y prioridad. `PUT` con semántica de reemplazo total invitaría a que el cliente borre campos por omisión. `PATCH` con un esquema Zod de campos opcionales y validación de "al menos un campo presente" es lo honesto.
+Todas las actualizaciones individuales son parciales (`PATCH`): cambiar el estado de una tarea no debe obligar a reenviar título ni prioridad.
+
+Sin embargo, para las etiquetas de una tarea se utiliza `PUT /api/tasks/:id/labels` enviando el conjunto completo `{ "labelIds": [...] }`:
+1. **Idempotencia y sincronización:** La asignación de etiquetas desde el diálogo de edición es una selección de conjunto. Un `PUT` atómico reemplaza la colección completa en una sola transacción, eliminando condiciones de carrera y peticiones desordenadas que ocurrirían con múltiples POST/DELETE individuales.
+2. **Garantía referencial:** En una sola operación el motor verifica que todas las etiquetas pertenezcan al mismo proyecto que la tarea a través de la clave foránea compuesta `(label_id, project_id)`.
 
 ### Por qué las tareas cuelgan del proyecto para crear y listar, pero no para editar
 
@@ -83,9 +92,34 @@ y el agregado de `/stats` trasladado a por-proyecto lo multiplicaba por 4,3.
   "dueDate": "2026-03-12",
   "completedAt": null,
   "createdAt": "2026-09-04T14:05:00.000Z",
-  "updatedAt": "2026-09-04T15:20:44.101Z"
+  "updatedAt": "2026-09-04T15:20:44.101Z",
+  "labels": [
+    {
+      "id": "9a3b0001-0000-4000-8000-000000000001",
+      "projectId": "8f14e45f-ceea-467a-9a1d-9e3f3f4a2b10",
+      "name": "Backend",
+      "color": "blue",
+      "createdAt": "2026-09-04T14:02:11.482Z",
+      "updatedAt": "2026-09-04T14:02:11.482Z"
+    }
+  ]
 }
 ```
+
+### Label (SL-18)
+
+```json
+{
+  "id": "9a3b0001-0000-4000-8000-000000000001",
+  "projectId": "8f14e45f-ceea-467a-9a1d-9e3f3f4a2b10",
+  "name": "Backend",
+  "color": "blue",
+  "createdAt": "2026-09-04T14:02:11.482Z",
+  "updatedAt": "2026-09-04T14:02:11.482Z"
+}
+```
+
+El color pertenece a la paleta cerrada de 12 nombres semánticos: `slate`, `red`, `orange`, `amber`, `yellow`, `green`, `teal`, `cyan`, `blue`, `indigo`, `purple`, `pink`. En base de datos se almacena la clave semántica bajo restricción `CHECK`, nunca el valor hexadecimal libre.
 
 `camelCase` en el borde HTTP, `snake_case` en PostgreSQL. La traducción vive en la capa de repositorio, en un único mapeador. Ninguna de las dos convenciones se filtra a la otra.
 

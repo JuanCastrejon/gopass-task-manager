@@ -8,7 +8,13 @@ import {
   ValidationError,
   WipLimitReachedError,
 } from '../../http/errors.js';
-import type { TaskRow } from './tasks.mapper.js';
+import type { TaskRow, TaskWithLabelsRow } from './tasks.mapper.js';
+import { toLabel } from '../labels/labels.mapper.js';
+import {
+  getLabelsForTasks,
+  getLabelsForTask,
+  setTaskLabels as setTaskLabelsRepo,
+} from '../labels/labels.repository.js';
 import type {
   CreateTaskInput,
   ListTasksQuery,
@@ -105,6 +111,9 @@ const LIST_QUERY = `
    AND ($2::task_status[]   IS NULL OR t.status   = ANY($2))
    AND ($3::task_priority[] IS NULL OR t.priority = ANY($3))
    AND ($4::text            IS NULL OR t.title ILIKE '%' || $4 || '%')
+   AND ($5::uuid[]          IS NULL OR EXISTS (
+     SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = ANY($5)
+   ))
   LEFT JOIN project_columns pc ON pc.id = t.column_id
   WHERE p.id = $1
   ORDER BY pc.position,
@@ -118,28 +127,45 @@ const LIST_QUERY = `
 
 export async function listTasksByProject(
   projectId: string,
-  filtros: ListTasksQuery = {},
-): Promise<TaskRow[]> {
+  filtros: Partial<ListTasksQuery> = {},
+): Promise<TaskWithLabelsRow[]> {
   const result = await pool.query<TaskRow & { project_exists: string | null }>(LIST_QUERY, [
     projectId,
     filtros.status ?? null,
     filtros.priority ?? null,
     filtros.q ?? null,
+    filtros.labels ?? null,
   ]);
 
   if (result.rows.length === 0) throw new ProjectNotFoundError(projectId);
   // La fila fantasma del LEFT JOIN: existe el proyecto, no hay tareas.
-  return result.rows.filter((row) => row.id !== null);
+  const tareas = result.rows.filter((row) => row.id !== null);
+  if (tareas.length === 0) return [];
+
+  // Segunda consulta para leer etiquetas: mantiene LIST_QUERY intacta
+  // y evita multiplicar filas cuando una tarea tiene múltiples etiquetas.
+  const taskIds = tareas.map((t) => t.id);
+  const labelsMap = await getLabelsForTasks(taskIds);
+
+  return tareas.map((t) => ({
+    ...t,
+    labels: (labelsMap.get(t.id) ?? []).map(toLabel),
+  }));
 }
 
-export async function findTaskById(id: string): Promise<TaskRow> {
+export async function findTaskById(id: string): Promise<TaskWithLabelsRow> {
   const result = await pool.query<TaskRow>(
     `SELECT ${TASK_FIELDS} FROM tasks WHERE id = $1`,
     [id],
   );
   const row = result.rows[0];
   if (!row) throw new TaskNotFoundError(id);
-  return row;
+
+  const labels = await getLabelsForTask(id);
+  return {
+    ...row,
+    labels: labels.map(toLabel),
+  };
 }
 
 /**
@@ -278,7 +304,7 @@ export async function createTask(projectId: string, input: CreateTaskInput): Pro
          RETURNING ${TASK_FIELDS}`,
         values,
       );
-      return result.rows[0]!;
+      return { ...result.rows[0]!, labels: [] };
     } catch (err) {
       if (err instanceof WipLimitReachedError || err instanceof ColumnNotFoundError) throw err;
       // Aquí un 23503 solo puede significar que el proyecto padre no existe.
@@ -368,7 +394,8 @@ export async function updateTask(id: string, patch: PatchTaskInput): Promise<Tas
       );
       const row = result.rows[0];
       if (!row) throw new TaskNotFoundError(id);
-      return row;
+      const labels = await getLabelsForTask(id);
+      return { ...row, labels: labels.map(toLabel) };
     } catch (err) {
       if (
         err instanceof TaskNotFoundError ||
@@ -488,7 +515,8 @@ export async function reorderTask(id: string, input: ReorderTaskInput): Promise<
           [id, destino.id, destino.category, nuevaPosicion],
         );
         await cliente.query('RELEASE SAVEPOINT reorder_intento');
-        return result.rows[0]!;
+        const labels = await getLabelsForTask(id);
+        return { ...result.rows[0]!, labels: labels.map(toLabel) };
       } catch (err) {
         const esColision =
           isPgError(err) &&
@@ -518,7 +546,8 @@ export async function reorderTask(id: string, input: ReorderTaskInput): Promise<
            RETURNING ${TASK_FIELDS}`,
           [id, destino.id, destino.category, nuevaPosicion],
         );
-        return reintento.rows[0]!;
+        const labels = await getLabelsForTask(id);
+        return { ...reintento.rows[0]!, labels: labels.map(toLabel) };
       }
     } catch (err) {
       if (
@@ -536,7 +565,16 @@ export async function reorderTask(id: string, input: ReorderTaskInput): Promise<
 }
 
 export async function deleteTask(id: string): Promise<void> {
-  // Borrar una tarea no tiene restricción: nada la referencia.
+  // Borrar una tarea elimina en cascada sus asignaciones en task_labels por la FK compuesta.
   const result = await pool.query('DELETE FROM tasks WHERE id = $1', [id]);
   if (result.rowCount === 0) throw new TaskNotFoundError(id);
+}
+
+export async function setTaskLabels(taskId: string, labelIds: string[]): Promise<TaskWithLabelsRow> {
+  const labels = await setTaskLabelsRepo(taskId, labelIds);
+  const task = await findTaskById(taskId);
+  return {
+    ...task,
+    labels: labels.map(toLabel),
+  };
 }

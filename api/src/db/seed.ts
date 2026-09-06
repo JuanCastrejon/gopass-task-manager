@@ -69,6 +69,26 @@ const TASKS: readonly [
   ['7c2e1b20-0000-4000-8000-00000000000b', 2, 'Reporte diario de partidas no conciliadas', 'DONE', 'LOW', null],
 ];
 
+const LABELS: readonly [id: string, projectIndex: number, name: string, color: string][] = [
+  ['9a3b0001-0000-4000-8000-000000000001', 0, 'Backend', 'blue'],
+  ['9a3b0001-0000-4000-8000-000000000002', 0, 'Urgente', 'red'],
+  ['9a3b0001-0000-4000-8000-000000000003', 0, 'Seguridad', 'amber'],
+  ['9a3b0001-0000-4000-8000-000000000004', 0, 'Infraestructura', 'teal'],
+];
+
+const TASK_LABELS: readonly [taskId: string, labelId: string, projectIndex: number][] = [
+  // Tarea 1: 3 etiquetas para mostrar píldoras y el indicador accesible «+N» (+1)
+  ['7c2e1b20-0000-4000-8000-000000000001', '9a3b0001-0000-4000-8000-000000000001', 0],
+  ['7c2e1b20-0000-4000-8000-000000000001', '9a3b0001-0000-4000-8000-000000000002', 0],
+  ['7c2e1b20-0000-4000-8000-000000000001', '9a3b0001-0000-4000-8000-000000000003', 0],
+  // Tarea 2: 2 etiquetas (se ven ambas píldoras sin +N)
+  ['7c2e1b20-0000-4000-8000-000000000002', '9a3b0001-0000-4000-8000-000000000001', 0],
+  ['7c2e1b20-0000-4000-8000-000000000002', '9a3b0001-0000-4000-8000-000000000004', 0],
+  // Tarea 3: 1 etiqueta
+  ['7c2e1b20-0000-4000-8000-000000000003', '9a3b0001-0000-4000-8000-000000000002', 0],
+  // Tarea 4: 0 etiquetas (permanece sin etiquetar)
+];
+
 export async function runSeed(): Promise<{ projects: number; tasks: number }> {
   const client = await pool.connect();
   try {
@@ -102,6 +122,28 @@ export async function runSeed(): Promise<{ projects: number; tasks: number }> {
         [id, project.id, title, status, priority, dueDaysOffset],
       );
       tasks += res.rowCount ?? 0;
+    }
+
+    for (const [id, projectIndex, name, color] of LABELS) {
+      const project = PROJECTS[projectIndex];
+      if (!project) continue;
+      await client.query(
+        `INSERT INTO labels (id, project_id, name, color)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (id) DO NOTHING`,
+        [id, project.id, name, color],
+      );
+    }
+
+    for (const [taskId, labelId, projectIndex] of TASK_LABELS) {
+      const project = PROJECTS[projectIndex];
+      if (!project) continue;
+      await client.query(
+        `INSERT INTO task_labels (task_id, label_id, project_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (task_id, label_id) DO NOTHING`,
+        [taskId, labelId, project.id],
+      );
     }
 
     /**

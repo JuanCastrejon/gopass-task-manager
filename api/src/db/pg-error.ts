@@ -48,6 +48,10 @@ export function translatePgError(err: unknown): AppError | null {
         return new AppError(409, ERROR_CODES.PROJECT_NAME_TAKEN,
           'Ya existe un proyecto con ese nombre.', { cause: err });
       }
+      if (err.constraint === 'labels_project_name_unique_ci') {
+        return new AppError(409, ERROR_CODES.LABEL_NAME_TAKEN,
+          'Ya existe una etiqueta con ese nombre en este proyecto.', { cause: err });
+      }
       return null;
 
     case '23514':
@@ -80,7 +84,11 @@ function constraintToField(constraint: string | undefined): string {
   switch (constraint) {
     case 'projects_name_not_blank':
     case 'projects_name_max_len':
+    case 'labels_name_not_blank':
+    case 'labels_name_max_len':
       return 'name';
+    case 'labels_color_check':
+      return 'color';
     case 'tasks_title_not_blank':
     case 'tasks_title_max_len':
       return 'title';
@@ -97,6 +105,12 @@ function checkMessage(constraint: string | undefined): string {
       return 'El nombre no puede estar vacío.';
     case 'projects_name_max_len':
       return 'El nombre supera los 120 caracteres.';
+    case 'labels_name_not_blank':
+      return 'El nombre no puede estar vacío.';
+    case 'labels_name_max_len':
+      return 'El nombre supera los 50 caracteres.';
+    case 'labels_color_check':
+      return 'El color debe pertenecer a la paleta permitida.';
     case 'tasks_title_not_blank':
       return 'El título no puede estar vacío.';
     case 'tasks_title_max_len':

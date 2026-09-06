@@ -112,11 +112,38 @@ const repeatable = <T extends readonly [string, ...string[]]>(values: T) =>
     .transform((list) => [...new Set(list)])
     .optional();
 
-export const listTasksQuerySchema = z.object({
-  status: repeatable(TASK_STATUSES),
-  priority: repeatable(TASK_PRIORITIES),
-  q: z.string().trim().min(1).max(200).optional(),
-});
+const repeatableUuid = z
+  .preprocess(
+    (raw) => {
+      if (raw === undefined) return undefined;
+      if (Array.isArray(raw)) return raw;
+      if (typeof raw === 'string' && raw.includes(',')) return raw.split(',');
+      return [raw];
+    },
+    z
+      .array(z.string().uuid('El identificador de etiqueta debe ser un UUID.'))
+      .min(1, 'El filtro no puede ir vacío.'),
+  )
+  .transform((list) => [...new Set(list)])
+  .optional();
+
+export const listTasksQuerySchema = z
+  .object({
+    status: repeatable(TASK_STATUSES),
+    priority: repeatable(TASK_PRIORITIES),
+    q: z.string().trim().min(1).max(200).optional(),
+    labels: repeatableUuid,
+    labelId: repeatableUuid,
+  })
+  .transform((query) => {
+    const combined = [...(query.labels ?? []), ...(query.labelId ?? [])];
+    return {
+      status: query.status,
+      priority: query.priority,
+      q: query.q,
+      labels: combined.length > 0 ? [...new Set(combined)] : undefined,
+    };
+  });
 
 /**
  * Reordenación de una tarea entre dos vecinas o al inicio/fin de una columna.
