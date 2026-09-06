@@ -19,7 +19,7 @@ import {
 import { Columns3, Plus, Tag } from 'lucide-react';
 import { Button } from '../../components/ui/Button.tsx';
 import { ErrorState, Skeleton } from '../../components/ui/States.tsx';
-import { LABEL_STYLE, StatusDot } from '../../components/ui/Badge.tsx';
+import { LABEL_STYLE } from '../../components/ui/Badge.tsx';
 import { CampoBusqueda, GrupoDePrioridad } from '../../components/ui/Filtros.tsx';
 import { messageFor } from '../../lib/error-messages.ts';
 import { useFiltrosDeUrl } from '../../lib/use-filtros-de-url.ts';
@@ -36,6 +36,7 @@ import { useLabels } from '../labels/api.ts';
 import { LabelManagerDialog } from '../labels/LabelManagerDialog.tsx';
 import { TaskCard } from './TaskCard.tsx';
 import { TaskFormDialog } from './TaskFormDialog.tsx';
+import { CabeceraColumna } from './CabeceraColumna.tsx';
 import { useDeleteTask, useReorderTask, useTasks, useUpdateTask } from './api.ts';
 import { crearDetectorTablero, type DatosColisionTablero } from './collision.ts';
 
@@ -593,35 +594,12 @@ export function TaskBoard({
                 destinoInvalidoPorWip={destinoInvalidoPorWip}
                 recuentoActual={dentro.length}
               >
-                <header className="mb-2 flex items-center gap-1.5 px-0.5">
-                  {/* El punto sigue el color de la CATEGORÍA, no del nombre:
-                      «QA» y «En revisión» son ambas trabajo en curso y deben
-                      leerse como tal de un vistazo. */}
-                  <StatusDot status={col.category} />
-                  <h3 className="min-w-0 truncate text-xs font-semibold uppercase tracking-wide text-ink-muted" title={col.name}>
-                    {col.name}
-                  </h3>
-                  {/*
-                    El límite se muestra solo donde se declaró. Un contador
-                    «2/3» junto a la columna limitada es la forma en que un
-                    tablero kanban hace visible el cuello de botella antes de
-                    chocar con él.
-                  */}
-                  {col.wipLimit !== null ? (
-                    <span
-                      className={`ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs font-medium tabular-nums ${
-                        dentro.length >= col.wipLimit ? 'bg-danger-soft text-danger' : 'text-ink-muted'
-                      }`}
-                      title={`${dentro.length} de un máximo de ${col.wipLimit} en ${col.name}`}
-                    >
-                      {dentro.length}/{col.wipLimit}
-                    </span>
-                  ) : (
-                    <span className="ml-auto shrink-0 text-xs tabular-nums text-ink-muted">
-                      {dentro.length}
-                    </span>
-                  )}
-                </header>
+                <CabeceraColumna
+                  projectId={projectId}
+                  columna={col}
+                  arrastrando={arrastrada !== null}
+                  recuentoActual={dentro.length}
+                />
 
                 {/* El orden es configuración del tablero, no preferencia de
                     cada navegador: se guarda en la columna y lo ve el equipo
