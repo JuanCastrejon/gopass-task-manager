@@ -83,6 +83,9 @@ export function TaskBoard({
   const [moviendoId, setMoviendoId] = useState<string | null>(null);
   const [recienMovida, setRecienMovida] = useState<string | null>(null);
 
+  /** Columnas de categoría DONE para el control de completar de un clic (SL-16). */
+  const columnasDone = columnas.filter((c) => c.category === 'DONE');
+
   /** Tarjeta que se está arrastrando ahora mismo, para pintarla en el overlay. */
   const [arrastrada, setArrastrada] = useState<Task | null>(null);
 
@@ -499,6 +502,7 @@ export function TaskBoard({
                         autoFocus={recienMovida === task.id}
                         anterior={anterior}
                         siguiente={siguiente}
+                        columnasDone={columnasDone}
                         onMove={(columnId) => moverTarea(task, columnId, 'flecha')}
                         onEdit={() => setEditando(task)}
                         onDelete={() => borrarTarea(task)}
