@@ -1,17 +1,17 @@
 import { expect, test } from './limpieza.js';
 
 /**
- * Escenario 5 — los filtros del panel de proyectos.
+ * Escenario 5 — la búsqueda del panel de proyectos.
  *
- * Lo que solo se puede demostrar aquí es la cadena entera: que el conteo por
- * prioridad que pinta la tarjeta viene del `FILTER` de PostgreSQL, que el chip
- * filtra por él, y que el estado del filtro sobrevive a una recarga porque vive
+ * Lo que solo se puede demostrar aquí es la cadena entera: que la señal de
+ * urgencia que pinta la tarjeta viene del `FILTER` de PostgreSQL, que la
+ * tarjeta entera navega, y que la búsqueda sobrevive a una recarga porque vive
  * en la URL. Las pruebas de componente simulan la API; esta no.
  *
  * Nombre único por ejecución: el índice de la base es `lower(btrim(name))` y el
  * fixture de limpieza borra lo que empiece por «E2E ».
  */
-test('los filtros del inicio aíslan proyectos por prioridad y sobreviven a la recarga', async ({
+test('la búsqueda del inicio aísla proyectos por nombre y sobrevive a la recarga', async ({
   page,
 }) => {
   const sufijo = Date.now().toString(36);
@@ -31,7 +31,7 @@ test('los filtros del inicio aíslan proyectos por prioridad y sobreviven a la r
     await dialogo.getByRole('button', { name: 'Crear proyecto' }).click();
 
     const tarjeta = page.locator('article').filter({ hasText: proyecto });
-    await tarjeta.getByRole('link', { name: 'Ver tareas' }).click();
+    await tarjeta.getByRole('link', { name: /^Abrir tareas de/ }).click();
 
     await page.getByRole('button', { name: 'Añadir tarea a Por hacer' }).click();
     const dialogoTarea = page.getByRole('dialog');
@@ -45,34 +45,22 @@ test('los filtros del inicio aíslan proyectos por prioridad y sobreviven a la r
   const tarjetaAlta = page.locator('article').filter({ hasText: conAlta });
   const tarjetaBaja = page.locator('article').filter({ hasText: conBaja });
 
-  // El desglose de la tarjeta sale del agregado de PostgreSQL, no del cliente.
+  // La señal de urgencia sale del agregado de PostgreSQL, no del cliente: el
+  // proyecto con una tarea de prioridad alta la muestra, y el que solo tiene
+  // una de prioridad baja no muestra nada.
   await expect(tarjetaAlta.getByLabel('Alta: 1 tarea')).toBeVisible();
-  await expect(tarjetaBaja.getByLabel('Baja: 1 tarea')).toBeVisible();
+  await expect(tarjetaBaja.getByLabel(/^Alta:/)).toHaveCount(0);
 
-  // --- el chip filtra por «tiene al menos una tarea de esa prioridad» ---
-  await page.getByRole('group', { name: /Filtrar proyectos/ }).getByRole('button', { name: 'Alta' }).click();
-
-  await expect(tarjetaAlta).toBeVisible();
-  await expect(tarjetaBaja).toBeHidden();
-  await expect(page).toHaveURL(/priority=HIGH/);
-
-  // --- combinado con la búsqueda por nombre ---
+  // --- fuera del proyecto solo se busca por nombre ---
   await page.getByLabel('Buscar proyectos por nombre').fill(conAlta);
   await expect(tarjetaAlta).toBeVisible();
-
-  // El chip tiene que seguir pulsado: el temporizador del buscador escribe en
-  // la URL 250 ms después, y con una versión capturada del closure se llevaría
-  // por delante la prioridad recién elegida.
-  await expect(page).toHaveURL(/priority=HIGH/);
+  await expect(tarjetaBaja).toBeHidden();
   await expect(page).toHaveURL(/q=/);
 
-  // --- LA RECARGA: el filtro vive en la URL, no en el estado de React ---
+  // --- LA RECARGA: la búsqueda vive en la URL, no en el estado de React ---
   await page.reload();
 
   await expect(page.getByLabel('Buscar proyectos por nombre')).toHaveValue(conAlta);
-  await expect(
-    page.getByRole('group', { name: /Filtrar proyectos/ }).getByRole('button', { name: 'Alta' }),
-  ).toHaveAttribute('aria-pressed', 'true');
   await expect(tarjetaAlta).toBeVisible();
   await expect(tarjetaBaja).toBeHidden();
 
@@ -81,7 +69,14 @@ test('los filtros del inicio aíslan proyectos por prioridad y sobreviven a la r
   await expect(page.getByText('Ningún proyecto coincide')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Crear el primer proyecto' })).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Limpiar filtros' }).click();
+  await page.getByRole('button', { name: 'Limpiar búsqueda' }).click();
   await expect(tarjetaAlta).toBeVisible();
   await expect(tarjetaBaja).toBeVisible();
+
+  // --- la tarjeta entera abre el proyecto, no solo el enlace del pie ---
+  // Se pulsa sobre la descripción, que es el punto donde fallaban las dos
+  // alternativas descartadas: con un pseudo-elemento estirado el texto no
+  // recibe el puntero, y al subirlo por encima esa franja dejaba de navegar.
+  await tarjetaAlta.getByText('Sin descripción').click();
+  await expect(page.getByRole('heading', { level: 1, name: conAlta })).toBeVisible();
 });

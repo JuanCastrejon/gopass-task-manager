@@ -68,7 +68,7 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
-describe('ProjectsPage — filtros', () => {
+describe('ProjectsPage — búsqueda', () => {
   it('parte mostrando todos los proyectos', () => {
     pintar();
     expect(visibles()).toEqual(['Telepeaje', 'Parqueaderos', 'Conciliación']);
@@ -85,36 +85,31 @@ describe('ProjectsPage — filtros', () => {
     expect(visibles()).toEqual(['Parqueaderos']);
   });
 
-  it('el chip de prioridad deja los proyectos que tienen al menos una tarea así', async () => {
-    const user = userEvent.setup();
+  it('no ofrece filtros de prioridad: fuera del proyecto solo se busca', () => {
     pintar();
 
-    await user.click(screen.getByRole('button', { name: 'Alta' }));
-
-    // «Parqueaderos» tiene tareas, pero ninguna de prioridad alta; y
-    // «Conciliación» no tiene ninguna. Ambos salen.
-    expect(visibles()).toEqual(['Telepeaje']);
+    // Un proyecto no tiene prioridad, así que un chip aquí prometería una
+    // dimensión que la entidad no posee. Los filtros ricos viven dentro del
+    // tablero, donde esa dimensión sí existe.
+    for (const etiqueta of ['Todas', 'Baja', 'Media', 'Alta']) {
+      expect(screen.queryByRole('button', { name: etiqueta })).toBeNull();
+    }
+    expect(screen.getByLabelText('Buscar proyectos por nombre')).toBeTruthy();
   });
 
-  it('combina búsqueda y prioridad, y lo deja en la URL para poder compartirlo', async () => {
+  it('deja la búsqueda en la URL para poder compartirla', async () => {
     const user = userEvent.setup();
     pintar();
 
-    await user.click(screen.getByRole('button', { name: 'Media' }));
     await user.type(screen.getByLabelText('Buscar proyectos por nombre'), 'parque');
 
     // La lista ya está filtrada aunque la URL todavía no lo diga: ese desfase
-    // es el diseño, no un fallo. El chip sí va directo, porque un clic no
-    // necesita retardo.
+    // es el diseño, no un fallo. Filtrar en cliente no necesita esperar al
+    // retardo, que existe solo para no llenar el historial.
     expect(visibles()).toEqual(['Parqueaderos']);
-    expect(new URLSearchParams(window.location.search).get('priority')).toBe('MEDIUM');
 
-    // La búsqueda llega a la URL cuando vence el retardo, y sin llevarse por
-    // delante la prioridad ya escrita.
     await waitFor(() => {
-      const params = new URLSearchParams(window.location.search);
-      expect(params.get('q')).toBe('parque');
-      expect(params.get('priority')).toBe('MEDIUM');
+      expect(new URLSearchParams(window.location.search).get('q')).toBe('parque');
     });
   });
 
@@ -129,27 +124,48 @@ describe('ProjectsPage — filtros', () => {
     expect(screen.queryByRole('button', { name: /Crear el primer proyecto/ })).toBeNull();
   });
 
-  it('«Limpiar filtros» devuelve la lista entera', async () => {
+  it('«Limpiar búsqueda» devuelve la lista entera', async () => {
     const user = userEvent.setup();
     pintar();
 
-    await user.click(screen.getByRole('button', { name: 'Alta' }));
     await user.type(screen.getByLabelText('Buscar proyectos por nombre'), 'zzz');
     expect(screen.queryByRole('article')).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: 'Limpiar filtros' }));
+    await user.click(screen.getByRole('button', { name: 'Limpiar búsqueda' }));
 
     expect(visibles()).toEqual(['Telepeaje', 'Parqueaderos', 'Conciliación']);
     expect(window.location.search).toBe('');
   });
 
-  it('la tarjeta muestra el desglose que explica por qué el chip la deja o la quita', () => {
+  it('la tarjeta señala el trabajo urgente, y solo ese', () => {
+    pintar();
+    const [telepeaje, parqueaderos] = screen.getAllByRole('article');
+
+    // Telepeaje tiene dos de prioridad alta: se señalan.
+    expect(within(telepeaje!).getByLabelText('Alta: 2 tareas')).toBeTruthy();
+
+    // Baja y media son estado operativo normal, no decisión: no se pintan.
+    expect(within(telepeaje!).queryByLabelText(/^Baja:/)).toBeNull();
+    expect(within(telepeaje!).queryByLabelText(/^Media:/)).toBeNull();
+
+    // Parqueaderos solo tiene medias: la tarjeta no señala nada.
+    expect(within(parqueaderos!).queryByLabelText(/^Alta:/)).toBeNull();
+  });
+
+  it('la tarjeta entera es un enlace al proyecto, sin anidar los botones dentro', () => {
     pintar();
     const telepeaje = screen.getAllByRole('article')[0]!;
 
-    expect(within(telepeaje).getByLabelText('Alta: 2 tareas')).toBeTruthy();
-    expect(within(telepeaje).getByLabelText('Baja: 1 tarea')).toBeTruthy();
-    // Sin tareas de prioridad media no se pinta un cero: sería ruido.
-    expect(within(telepeaje).queryByLabelText(/^Media:/)).toBeNull();
+    const enlace = within(telepeaje).getByRole('link', { name: 'Abrir tareas de Telepeaje' });
+    expect(enlace.getAttribute('href')).toMatch(/^\/projects\//);
+
+    // Un `<a>` no puede contener contenido interactivo: los botones son
+    // hermanos del enlace, no descendientes.
+    const editar = within(telepeaje).getByRole('button', { name: 'Editar Telepeaje' });
+    expect(enlace.contains(editar)).toBe(false);
+
+    // Tres paradas de tabulación, ni una más: editar, eliminar y el enlace.
+    // «Ver tareas» es un `<span>` dentro del mismo enlace, no un segundo.
+    expect(within(telepeaje).getAllByRole('link')).toHaveLength(1);
   });
 });

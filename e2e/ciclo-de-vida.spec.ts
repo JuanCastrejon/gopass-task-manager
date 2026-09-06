@@ -28,7 +28,7 @@ test('una tarea creada sobrevive a la recarga en la columna a la que se movió',
   await expect(tarjeta).toContainText('Sin tareas');
 
   // --- entrar al detalle ---
-  await tarjeta.getByRole('link', { name: 'Ver tareas' }).click();
+  await tarjeta.getByRole('link', { name: /^Abrir tareas de/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: proyecto })).toBeVisible();
 
   // --- crear la tarea en «Por hacer» ---

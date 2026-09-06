@@ -26,7 +26,7 @@ test('borrar un proyecto con tareas explica el conflicto y no destruye nada', as
   await dialogoProyecto.getByRole('button', { name: 'Crear proyecto' }).click();
 
   const tarjeta = page.locator('article').filter({ hasText: proyecto });
-  await tarjeta.getByRole('link', { name: 'Ver tareas' }).click();
+  await tarjeta.getByRole('link', { name: /^Abrir tareas de/ }).click();
 
   // Cada columna es una región con nombre propio, así que se localiza por
   // su rol y su nombre accesible en vez de por texto suelto.
