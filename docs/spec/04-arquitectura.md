@@ -710,9 +710,136 @@ El diagnóstico secundario («completada a tiempo» o «completada tarde») se m
 
 **Comportamiento visual y accesible.** La insignia de vencimiento se muestra **siempre que la tarea tenga fecha asignada**, no únicamente cuando está próxima a vencer o vencida. Además, el estado se comunica de forma redundante en el texto visible (`Vencida · 12 mar`, `Vence hoy · 12 mar`, `Vence pronto · 12 mar`) y en el atributo `aria-label`, respetando el criterio de accesibilidad de nunca transmitir información exclusivamente a través del color.
 
+### ADR-029 — Etiquetas normalizadas con clave foránea compuesta
+
+**Contexto.** Incorporar etiquetas a las tareas (SL-18) abre el debate clásico entre dos modelos de
+persistencia: desnormalizado con un array `text[]` e índice GIN en la propia tabla `tasks`, o
+normalizado relacional con una tabla `labels` y una tabla puente `task_labels`.
+
+Para no decidir por intuición, se construyó un banco de pruebas con **200 proyectos, 20 000 tareas y
+40 000 asignaciones**, con exactamente las mismas asignaciones en ambos modelos, verificado fila a fila.
+
+**Las mediciones, que son el argumento:**
+
+| Consulta (caché caliente) | Normalizada | Array `text[]` + GIN |
+|---|---|---|
+| Listar un proyecto con sus etiquetas | 0,897 ms | 0,143 ms |
+| Filtrar por alguna de dos etiquetas | 0,779 ms | 1,032 ms |
+| Filtrar por todas | 0,582 ms | 0,531 ms |
+| **Renombrar una etiqueta en uso** | **0,346 ms** | 1,540 ms |
+
+**Lo que hay que dejar escrito, y es lo interesante: el rendimiento NO decidió.**
+El array gana el listado por 0,75 ms y pierde el filtro por 0,25 ms. A esta escala el índice por
+proyecto (`tasks_project_id_idx`) ya reduce el conjunto de datos a ~100 filas antes de que el índice GIN
+llegue a participar. La decisión la determinaron otros dos factores incontrovertibles:
+
+1. **La integridad, que es categórica:**
+   ```
+   array:        labels || ARRAY['etiqueta fantasma']  ->  UPDATE 1     (aceptada)
+   tabla puente: label_id inexistente                   ->  ERROR 23503
+   ```
+   Un array acepta etiquetas inexistentes o eliminadas en absoluto silencio; la tabla puente garantiza
+   el rechazo atómico con `SQLSTATE 23503` en el motor de base de datos.
+
+2. **El coste de renombrar:**
+   Renombrar una etiqueta en uso cuesta **4,5 veces más con array** (1,540 ms vs 0,346 ms) **y es
+   creciente** con el número de tareas etiquetadas (obliga a escanear y actualizar cada fila de `tasks`),
+   mientras que en el modelo normalizado es siempre un único `UPDATE` en `labels` sea cual sea el volumen de uso.
+
+**La clave foránea compuesta, verificada contra el motor:**
+En un sistema multitenant o multiproyecto, una tabla puente simple `(task_id, label_id)` adolece de un
+grave defecto de integridad: una tarea del proyecto A puede recibir etiquetas del proyecto B sin que el
+motor lo detecte. Para impedirlo, se definieron restricciones únicas sobre `(id, project_id)` en `tasks` y
+`labels`, y claves foráneas compuestas en `task_labels`:
+
+```sql
+CONSTRAINT task_labels_task_fkey
+  FOREIGN KEY (task_id, project_id)
+  REFERENCES tasks (id, project_id) ON DELETE CASCADE,
+
+CONSTRAINT task_labels_label_fkey
+  FOREIGN KEY (label_id, project_id)
+  REFERENCES labels (id, project_id) ON DELETE CASCADE
+```
+
+Comprobación literal contra PostgreSQL 16:
+```
+sin ella: INSERT tarea del proyecto 77 + etiqueta del proyecto 3  ->  INSERT 0 1
+con ella: el mismo INSERT  ->  ERROR 23503
+          Key (label_id, project_id)=(3, 77) is not present in table labels
+```
+Es el mismo patrón arquitectónico de integridad que `(column_id, status) → project_columns (id, category)`
+introducido en la migración `0004` (ADR-023).
+
+**Decisión de leer las etiquetas en una segunda consulta:**
+Se evaluó cómo hidratar las etiquetas en el listado de tareas del tablero:
+
+| Enfoque | Tiempo |
+|---|---|
+| Una consulta con `LEFT JOIN` + `jsonb_agg` + `GROUP BY` | 1,429 ms |
+| Dos consultas: `LIST_QUERY` intacta + `WHERE task_id = ANY(...)` | **0,867 ms** |
+
+Lo importante no es únicamente el medio milisegundo de diferencia: al utilizar dos consultas,
+**`LIST_QUERY` no se toca**, la compleja escalera de `CASE` de ordenación de ADR-024 queda completamente
+intacta y **desaparece por construcción el riesgo de que el join multiplique filas**.
+*Salvedad honesta:* son dos viajes de ida y vuelta a la base de datos; con PostgreSQL y la API en la misma
+red Docker la latencia es despreciable (~0,1 ms), pero habría que volver a medirlo si la base residiera
+en una red remota con alta latencia.
+
+**El filtro sí toca `LIST_QUERY`:**
+El filtro por etiquetas (`filtros.labels`) requiere acotar las tareas devueltas. Se implementa con
+`EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = ANY($5))` **estrictamente
+dentro de la cláusula `ON` del `LEFT JOIN`, nunca en el `WHERE`**. Si se colocara en el `WHERE`, un proyecto
+existente que no tuviese tareas con esas etiquetas perdería la fila del proyecto en el resultado, y la API
+respondería un `404 Not Found` falso en lugar del array vacío `[]` con `200 OK` (ADR-016).
+
 **Alternativas descartadas:**
-1. **`timestamptz` con hora opcional al estilo Trello.** Descartada por el desfase medido de 5 horas entre Bogotá y los contenedores UTC, que alteraría el día de la tarjeta en horario vespertino.
-2. **Devolver el semáforo calculado como campo derivado desde la API.** Descartada porque la respuesta HTTP quedaría obsoleta al instante siguiente si cruza la medianoche, además de supeditar el estado de urgencia al reloj del contenedor (UTC) en lugar de al reloj civil del usuario local.
+1. **Array `text[]` con índice GIN:** Descartada por falta de integridad referencial, aceptación de
+   etiquetas huérfanas y coste cuadrático al renombrar etiquetas populares.
+2. **Tabla puente simple sin clave foránea compuesta:** Descartada porque permite asignaciones cruzadas
+   de etiquetas entre proyectos diferentes, violando el aislamiento por proyecto en el motor.
+
+---
+
+### ADR-030 — Una etiqueta es configuración del proyecto, no contenido
+
+**Contexto.** Este ADR nace de un **defecto real** que encontró la prueba E2E (`e2e/etiquetas.spec.ts`)
+durante el desarrollo de SL-18.
+
+La migración inicial `0009_etiquetas.sql` declaró `labels.project_id ... ON DELETE RESTRICT`, copiando por
+inercia lo que hace `tasks`. Consecuencia inmediata: al borrar un proyecto que tenía una etiqueta creada
+y **ninguna tarea**, la API respondía con **`HTTP 500 INTERNAL_ERROR`**, en lugar de un 204 exitoso o un 409 explicado.
+
+El 500 se producía porque el middleware y los repositorios (`pg-error.ts`) solo reconocen y traducen el
+`23503` proveniente de `tasks_project_id_fkey`. La foránea de `labels` abrió un tercer camino de violación
+de integridad referencial que nadie capturaba, cayendo al manejador genérico de 500.
+
+**Traducir ese tercer `23503` habría sido tapar el síntoma.** El verdadero problema era que la regla de
+integridad estaba conceptualmente mal elegida. El repositorio ya distinguía de manera explícita las dos
+naturalezas de entidades que cuelgan de un proyecto:
+
+| Entidad | Regla | Naturaleza y justificación |
+|---|---|---|
+| `tasks` | `ON DELETE RESTRICT` | **Contenido del usuario;** el 409 lo protege contra pérdida accidental y ofrece salida explícita. |
+| `project_columns` | `ON DELETE CASCADE` | **Configuración del tablero;** no tiene significado ni existencia fuera del proyecto. |
+
+Una etiqueta pertenece inequívocamente a la segunda naturaleza: es configuración del tablero, vive dentro
+del espacio de nombres del proyecto y no significa nada fuera de él. Conservar una etiqueta tras eliminar el
+proyecto dejaría filas huérfanas inaccesibles.
+
+**Decisión.** La migración `0010_etiquetas_cascada_al_borrar_proyecto.sql` modifica la clave foránea a
+`ON DELETE CASCADE`.
+
+**Verificación:**
+1. Borrar un proyecto con etiquetas y 0 tareas devuelve `204 No Content` y limpia las etiquetas sin dejar
+   filas huérfanas.
+2. **El 409 de tareas permanece rigurosamente intacto:** si el proyecto contiene tareas (etiquetadas o no),
+   la base dispara la restricción `tasks_project_id_fkey` con `ON DELETE RESTRICT`, la API responde
+   `409 PROJECT_HAS_TASKS`, las tareas continúan vivas e intactas, y tras eliminarlas explícitamente, el
+   proyecto se borra con 204 llevándose sus etiquetas.
+
+Hay una prueba de regresión específica en `api/tests/integration/projects.test.ts` que fija permanentemente
+este comportamiento.
 
 ## 4. Stack final
 
@@ -731,7 +858,7 @@ El diagnóstico secundario («completada a tiempo» o «completada tarde») se m
 | Modales | elemento nativo `<dialog>` | — |
 | Arrastre | `@dnd-kit/core` + `@dnd-kit/sortable` (ADR-021, ADR-025) | 6.3.1 / 10.0.0 |
 | Pruebas | Vitest + Supertest | — |
-| E2E | Playwright (14 escenarios) | — |
+| E2E | Playwright (15 escenarios) | — |
 | CI | GitHub Actions | — |
 | Gates | `sistema-multiagente-sdlc` (`quality-gate`, `coverage-diff`) | 2.2.2 |
 | Gestor de paquetes | npm | 10.x |

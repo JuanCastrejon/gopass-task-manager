@@ -16,10 +16,10 @@ import {
   verticalListSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable';
-import { Columns3, Plus } from 'lucide-react';
+import { Columns3, Plus, Tag } from 'lucide-react';
 import { Button } from '../../components/ui/Button.tsx';
 import { ErrorState, Skeleton } from '../../components/ui/States.tsx';
-import { StatusDot } from '../../components/ui/Badge.tsx';
+import { LABEL_STYLE, StatusDot } from '../../components/ui/Badge.tsx';
 import { CampoBusqueda, GrupoDePrioridad } from '../../components/ui/Filtros.tsx';
 import { messageFor } from '../../lib/error-messages.ts';
 import { useFiltrosDeUrl } from '../../lib/use-filtros-de-url.ts';
@@ -32,6 +32,8 @@ import {
 } from '../../types/api.ts';
 import { useUpdateColumn } from '../columns/api.ts';
 import { ColumnManagerDialog } from '../columns/ColumnManagerDialog.tsx';
+import { useLabels } from '../labels/api.ts';
+import { LabelManagerDialog } from '../labels/LabelManagerDialog.tsx';
 import { TaskCard } from './TaskCard.tsx';
 import { TaskFormDialog } from './TaskFormDialog.tsx';
 import { useDeleteTask, useReorderTask, useTasks, useUpdateTask } from './api.ts';
@@ -61,8 +63,19 @@ export function TaskBoard({
    * dimensión de estado. Filtrar por `DONE` dejaría dos columnas vacías y el
    * tablero parecería roto en vez de filtrado.
    */
-  const { busqueda, setBusqueda, busquedaUrl, prioridad, cambiarPrioridad, hayFiltro } =
-    useFiltrosDeUrl();
+  const {
+    busqueda,
+    setBusqueda,
+    busquedaUrl,
+    prioridad,
+    cambiarPrioridad,
+    etiquetas,
+    alternarEtiqueta,
+    hayFiltro,
+  } = useFiltrosDeUrl();
+
+  const { data: projectLabels = [] } = useLabels(projectId);
+  const [gestionandoEtiquetas, setGestionandoEtiquetas] = useState(false);
 
   // Aquí se filtra en el servidor y por eso se consulta con `busquedaUrl`, ya
   // retardada: una colección de tareas puede crecer sin techo y `q` viaja al
@@ -70,6 +83,7 @@ export function TaskBoard({
   const tareas = useTasks(projectId, {
     ...(busquedaUrl ? { q: busquedaUrl } : {}),
     ...(prioridad ? { priority: [prioridad] } : {}),
+    ...(etiquetas.length > 0 ? { labels: etiquetas } : {}),
   });
 
   const mover = useUpdateTask();
@@ -323,6 +337,42 @@ export function TaskBoard({
             onChange={cambiarPrioridad}
             ariaLabel="Filtrar tareas por prioridad"
           />
+          {projectLabels.length > 0 && (
+            <div
+              className="flex flex-wrap items-center gap-1"
+              role="group"
+              aria-label="Filtrar tareas por etiqueta"
+            >
+              {projectLabels.map((lbl) => {
+                const activo = etiquetas.includes(lbl.id);
+                return (
+                  <button
+                    key={lbl.id}
+                    type="button"
+                    onClick={() => alternarEtiqueta(lbl.id)}
+                    aria-pressed={activo}
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                      activo
+                        ? `${LABEL_STYLE[lbl.color]} ring-2 ring-brand ring-offset-1 font-semibold`
+                        : 'border border-border bg-surface text-ink-muted hover:text-ink'
+                    }`}
+                  >
+                    <span
+                      className={`size-2 rounded-full ${
+                        activo ? 'bg-current' : 'border border-ink-muted/40'
+                      }`}
+                      aria-hidden
+                    />
+                    <span>{lbl.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <Button variant="secondary" size="sm" onClick={() => setGestionandoEtiquetas(true)}>
+            <Tag className="size-3.5" aria-hidden />
+            Etiquetas
+          </Button>
           <Button variant="secondary" size="sm" onClick={() => setGestionando(true)}>
             <Columns3 className="size-3.5" aria-hidden />
             Columnas
@@ -579,6 +629,13 @@ export function TaskBoard({
           onClose={() => setGestionando(false)}
           projectId={projectId}
           columnas={columnas}
+        />
+      )}
+      {gestionandoEtiquetas && (
+        <LabelManagerDialog
+          open
+          onClose={() => setGestionandoEtiquetas(false)}
+          projectId={projectId}
         />
       )}
     </section>

@@ -15,6 +15,7 @@ export const openApiSpec = {
     { name: 'Projects', description: 'Operaciones CRUD de proyectos y avance' },
     { name: 'Columns', description: 'Columnas del tablero, limites de trabajo en curso y orden' },
     { name: 'Tasks', description: 'Operaciones CRUD de tareas, estados y filtros' },
+    { name: 'Labels', description: 'Etiquetas de color por proyecto y asignación a tareas' },
     { name: 'Stats', description: 'Métricas analíticas del panel' },
   ],
   paths: {
@@ -435,6 +436,12 @@ export const openApiSpec = {
             description: 'Búsqueda por texto en título',
             schema: { type: 'string' },
           },
+          {
+            name: 'labels',
+            in: 'query',
+            description: 'Filtrar por una o varias etiquetas (repetible o separadas por coma, semántica alguna)',
+            schema: { type: 'string', format: 'uuid' },
+          },
         ],
         responses: {
           200: {
@@ -704,6 +711,231 @@ export const openApiSpec = {
         },
       },
     },
+    '/projects/{projectId}/labels': {
+      get: {
+        tags: ['Labels'],
+        summary: 'Listar etiquetas del proyecto (SL-18)',
+        parameters: [
+          {
+            name: 'projectId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Listado de etiquetas del proyecto',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/Label' },
+                },
+              },
+            },
+          },
+          404: {
+            description: 'Proyecto no encontrado',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        tags: ['Labels'],
+        summary: 'Crear etiqueta en el proyecto (SL-18)',
+        parameters: [
+          {
+            name: 'projectId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CreateLabelInput' },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: 'Etiqueta creada exitosamente',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Label' },
+              },
+            },
+          },
+          400: {
+            description: 'Error de validación (nombre vacío o color fuera de paleta)',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+          409: {
+            description: 'Nombre de etiqueta en uso dentro del proyecto',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/labels/{id}': {
+      patch: {
+        tags: ['Labels'],
+        summary: 'Actualizar etiqueta (SL-18)',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PatchLabelInput' },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Etiqueta actualizada',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Label' },
+              },
+            },
+          },
+          400: {
+            description: 'Error de validación',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+          404: {
+            description: 'Etiqueta no encontrada',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+          409: {
+            description: 'Nombre de etiqueta en uso dentro del proyecto',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+        },
+      },
+      delete: {
+        tags: ['Labels'],
+        summary: 'Eliminar etiqueta (SL-18)',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+          {
+            name: 'confirm',
+            in: 'query',
+            required: false,
+            schema: { type: 'boolean' },
+            description: 'Si es true, confirma la desasignación de tareas y eliminación.',
+          },
+        ],
+        responses: {
+          204: {
+            description: 'Etiqueta eliminada',
+          },
+          404: {
+            description: 'Etiqueta no encontrada',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+          409: {
+            description: 'La etiqueta tiene tareas asociadas y no se envió confirm=true',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/tasks/{id}/labels': {
+      put: {
+        tags: ['Labels'],
+        summary: 'Reemplazar conjunto completo de etiquetas de una tarea (SL-18)',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/SetTaskLabelsInput' },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Tarea actualizada con las etiquetas asignadas',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Task' },
+              },
+            },
+          },
+          400: {
+            description: 'Etiqueta inexistente o perteneciente a otro proyecto',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+          404: {
+            description: 'Tarea no encontrada',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetails' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/stats': {
       get: {
         tags: ['Stats'],
@@ -843,7 +1075,7 @@ export const openApiSpec = {
       },
       Task: {
         type: 'object',
-        required: ['id', 'projectId', 'title', 'status', 'priority', 'position', 'dueDate', 'completedAt', 'createdAt', 'updatedAt'],
+        required: ['id', 'projectId', 'title', 'status', 'priority', 'position', 'dueDate', 'completedAt', 'createdAt', 'updatedAt', 'labels'],
         properties: {
           id: { type: 'string', format: 'uuid' },
           projectId: { type: 'string', format: 'uuid' },
@@ -872,6 +1104,60 @@ export const openApiSpec = {
           completedAt: { type: 'string', format: 'date-time', nullable: true, example: null },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
+          labels: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/Label' },
+          },
+        },
+      },
+      Label: {
+        type: 'object',
+        required: ['id', 'projectId', 'name', 'color', 'createdAt', 'updatedAt'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          projectId: { type: 'string', format: 'uuid' },
+          name: { type: 'string', example: 'Backend' },
+          color: {
+            type: 'string',
+            enum: ['slate', 'red', 'orange', 'amber', 'yellow', 'green', 'teal', 'cyan', 'blue', 'indigo', 'purple', 'pink'],
+            example: 'blue',
+          },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      CreateLabelInput: {
+        type: 'object',
+        required: ['name', 'color'],
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 50, example: 'Backend' },
+          color: {
+            type: 'string',
+            enum: ['slate', 'red', 'orange', 'amber', 'yellow', 'green', 'teal', 'cyan', 'blue', 'indigo', 'purple', 'pink'],
+            example: 'blue',
+          },
+        },
+      },
+      PatchLabelInput: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 50, example: 'Core Backend' },
+          color: {
+            type: 'string',
+            enum: ['slate', 'red', 'orange', 'amber', 'yellow', 'green', 'teal', 'cyan', 'blue', 'indigo', 'purple', 'pink'],
+            example: 'teal',
+          },
+        },
+      },
+      SetTaskLabelsInput: {
+        type: 'object',
+        required: ['labelIds'],
+        properties: {
+          labelIds: {
+            type: 'array',
+            items: { type: 'string', format: 'uuid' },
+            example: ['9a3b0001-0000-4000-8000-000000000001'],
+          },
         },
       },
       ReorderTaskInput: {

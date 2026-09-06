@@ -7,6 +7,7 @@ import type { Task, TaskPriority, TaskStatus } from '../../types/api.ts';
 export interface TaskFilters {
   status?: TaskStatus[];
   priority?: TaskPriority[];
+  labels?: string[];
   q?: string;
 }
 
@@ -21,6 +22,7 @@ function toQueryString(filters: TaskFilters): string {
   // Repetir el parámetro es lo que espera la API: ?status=TODO&status=DONE
   filters.status?.forEach((s) => params.append('status', s));
   filters.priority?.forEach((p) => params.append('priority', p));
+  filters.labels?.forEach((l) => params.append('labels', l));
   if (filters.q) params.set('q', filters.q);
   const qs = params.toString();
   return qs ? `?${qs}` : '';

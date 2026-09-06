@@ -118,4 +118,24 @@ describe('seed de datos de demostración (RF-16)', () => {
     expect(conTiempo).toBeGreaterThan(0);
     expect(sinFecha).toBeGreaterThan(0);
   });
+
+  it('la demo incluye etiquetas de ejemplo, tareas con varias etiquetas (+N) y tareas sin etiquetar', async () => {
+    await runSeed();
+
+    const { rows: labels } = await pool.query('SELECT * FROM labels');
+    expect(labels.length).toBeGreaterThan(0);
+
+    const { rows: taskLabels } = await pool.query<{ task_id: string; total: string }>(
+      'SELECT task_id, count(*) AS total FROM task_labels GROUP BY task_id',
+    );
+    // Tareas con 3 o más etiquetas para que se vea el «+N» (+1)
+    const conTresOMas = taskLabels.filter((r) => Number(r.total) >= 3);
+    expect(conTresOMas.length).toBeGreaterThan(0);
+
+    // Tareas sin etiquetar en el mismo proyecto
+    const { rows: sinEtiquetas } = await pool.query(
+      'SELECT id FROM tasks WHERE id NOT IN (SELECT task_id FROM task_labels)',
+    );
+    expect(sinEtiquetas.length).toBeGreaterThan(0);
+  });
 });

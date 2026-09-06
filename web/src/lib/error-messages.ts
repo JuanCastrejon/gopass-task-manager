@@ -23,6 +23,9 @@ const MESSAGES: Record<string, string> = {
   // exista.
   PROJECT_NAME_TAKEN: 'Ya existe un proyecto con ese nombre.',
   PROJECT_NOT_FOUND: 'Este proyecto ya no existe.',
+  LABEL_NAME_TAKEN: 'Ya existe una etiqueta con ese nombre en este proyecto.',
+  LABEL_NOT_FOUND: 'Esta etiqueta ya no existe.',
+  LABEL_HAS_TASKS: 'Esta etiqueta está asignada a una o más tareas.',
   TASK_NOT_FOUND: 'Esta tarea ya no existe.',
   VALIDATION_ERROR: 'Revisa los datos del formulario.',
   ROUTE_NOT_FOUND: 'La dirección solicitada no existe.',

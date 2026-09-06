@@ -33,6 +33,10 @@ export interface FiltrosDeUrl {
   busquedaUrl: string;
   prioridad: TaskPriority | null;
   cambiarPrioridad: (valor: TaskPriority | null) => void;
+  /** Identificadores de etiquetas activas en el filtro de la URL (?labels=id1,id2) */
+  etiquetas: string[];
+  alternarEtiqueta: (id: string) => void;
+  cambiarEtiquetas: (ids: string[]) => void;
   limpiar: () => void;
   hayFiltro: boolean;
 }
@@ -44,6 +48,10 @@ export function useFiltrosDeUrl(): FiltrosDeUrl {
   const [params, setParams] = useSearchParams();
   const prioridad = params.get('priority') as TaskPriority | null;
   const busquedaUrl = params.get('q') ?? '';
+  const etiquetasStr = params.get('labels') ?? '';
+  const etiquetas = etiquetasStr
+    ? etiquetasStr.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
 
   const [busqueda, setBusqueda] = useState(busquedaUrl);
 
@@ -92,16 +100,41 @@ export function useFiltrosDeUrl(): FiltrosDeUrl {
         if (valor) next.set('priority', valor);
         else next.delete('priority');
       }),
+    etiquetas,
+    alternarEtiqueta: (id: string) =>
+      escribir((next) => {
+        const actual = (next.get('labels') ?? '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const yaExiste = actual.includes(id);
+        const siguiente = yaExiste ? actual.filter((x) => x !== id) : [...actual, id];
+        if (siguiente.length > 0) {
+          next.set('labels', siguiente.join(','));
+        } else {
+          next.delete('labels');
+        }
+      }),
+    cambiarEtiquetas: (ids: string[]) =>
+      escribir((next) => {
+        const limpias = ids.map((s) => s.trim()).filter(Boolean);
+        if (limpias.length > 0) {
+          next.set('labels', limpias.join(','));
+        } else {
+          next.delete('labels');
+        }
+      }),
     limpiar: () => {
       setBusqueda('');
       escribir((next) => {
         next.delete('q');
         next.delete('priority');
+        next.delete('labels');
       });
     },
     // Se mide sobre lo tecleado y no sobre la URL: durante los 250 ms del
     // retardo el usuario ya cree estar filtrando, y el mensaje de «nada
     // coincide» debe hablar de lo que ve, no de lo que aún no se ha escrito.
-    hayFiltro: busqueda.trim() !== '' || prioridad !== null,
+    hayFiltro: busqueda.trim() !== '' || prioridad !== null || etiquetas.length > 0,
   };
 }

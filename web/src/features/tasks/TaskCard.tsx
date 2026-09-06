@@ -3,7 +3,7 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { ArrowLeft, ArrowRight, Check, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/Button.tsx';
-import { DueDateBadge, PriorityBadge } from '../../components/ui/Badge.tsx';
+import { DueDateBadge, LabelPills, PriorityBadge } from '../../components/ui/Badge.tsx';
 import type { ProjectColumnSummary, Task } from '../../types/api.ts';
 
 /**
@@ -309,6 +309,12 @@ export function TaskCard({
 
       {task.description && (
         <p className="mt-1 line-clamp-2 text-xs text-ink-muted">{task.description}</p>
+      )}
+
+      {task.labels && task.labels.length > 0 && (
+        <div className="mt-2">
+          <LabelPills labels={task.labels} />
+        </div>
       )}
 
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-2" {...SIN_ARRASTRE}>

@@ -3,35 +3,41 @@
 ## 1. Dominio
 
 ```
-┌──────────────────────────┐
-│        Project           │
-│                          │
-│  id            uuid PK   │
-│  name          text      │  único (case-insensitive)
-│  description   text?     │
-│  created_at    timestamptz
-│  updated_at    timestamptz
-└────────────┬─────────────┘
-             │ 1
-             │
-             │ N          ON DELETE RESTRICT
-┌────────────▼─────────────┐
-│         Task             │
-│                          │
-│  id            uuid PK   │
-│  project_id    uuid FK   │
-│  title         text      │
-│  description   text?     │
-│  status        enum      │  TODO | IN_PROGRESS | DONE
-│  priority      enum      │  LOW | MEDIUM | HIGH
-│  position      double    │  único por columna (tasks_position_unica)
+┌──────────────────────────┐                      ┌──────────────────────────┐
+│        Project           │                      │         Label            │
+│                          │                      │                          │
+│  id            uuid PK   │                      │  id            uuid PK   │
+│  name          text      │  único (CI)          │  project_id    uuid FK   │  ON DELETE CASCADE
+│  description   text?     │                      │  name          text      │  único por proyecto (CI)
+│  created_at    timestamptz                      │  color         text      │  paleta de 12 (CHECK)
+│  updated_at    timestamptz                      │  (id, project_id) UNIQUE │
+└────────────┬─────────────┘                      └────────────┬─────────────┘
+             │ 1                                               │ 1
+             │                                                 │
+             │ N          ON DELETE RESTRICT                   │ N
+┌────────────▼─────────────┐                      ┌────────────▼─────────────┐
+│         Task             │                      │       TaskLabel          │
+│                          │ 1                  N │                          │
+│  id            uuid PK   ├──────────────────────┤  task_id      uuid PK,FK │  ON DELETE CASCADE
+│  project_id    uuid FK   │                      │  label_id     uuid PK,FK │  ON DELETE CASCADE
+│  column_id     uuid FK   │                      │  project_id   uuid       │  FK compuesta
+│  title         text      │                      │                          │
+│  description   text?     │                      │  (task_id, project_id)   │  -> tasks
+│  status        enum      │  TODO|IN_PROGRESS|…  │  (label_id, project_id)  │  -> labels
+│  priority      enum      │  LOW|MEDIUM|HIGH     └──────────────────────────┘
+│  position      double    │  único por columna
+│  due_date      date?     │  civil (YYYY-MM-DD)
 │  completed_at  timestamptz?
 │  created_at    timestamptz
 │  updated_at    timestamptz
+│  (id, project_id) UNIQUE │
 └──────────────────────────┘
 ```
 
-Dos entidades. No más. Un dominio de dos tablas con invariantes bien puestas comunica más criterio que cinco tablas a medio justificar.
+Dominio relacional con invariantes explícitas y garantías en el motor. Cada entidad tiene una frontera
+bien definida: `projects` como raíz de agregación, `tasks` como contenido de usuario protegido, y `labels`
+como taxonomía de configuración del tablero asociada mediante una tabla puente `task_labels` con claves
+foráneas compuestas.
 
 ## 2. Decisiones de modelado
 
@@ -199,14 +205,53 @@ La fecha de vencimiento (`tasks.due_date`, migración `0008_tasks_due_date.sql`)
 
 Entre las 19:00 y las 23:59 locales de Bogotá (5 horas al día), el contenedor se encuentra en la fecha del día siguiente. Si se utilizara `timestamptz`, una fecha «vence el 12 de marzo» almacenada como medianoche UTC (`2026-03-12T00:00:00Z`) se proyectaría en Bogotá como **el 11 de marzo a las 19:00**, haciendo que la tarjeta cambie de fecha según el huso horario de quien la observe. Con `due_date date NULL` no existe componente horario ni conversión de zona: la cadena `YYYY-MM-DD` es universal e idéntica para todos los usuarios.
 
+### Etiquetas normalizadas y claves foráneas compuestas (SL-18)
+
+Las etiquetas de tareas se modelan de forma relacional normalizada mediante las tablas `labels` y `task_labels` (migraciones `0009_etiquetas.sql` y `0010_etiquetas_cascada_al_borrar_proyecto.sql`). Se descartó la alternativa de almacenar un array `text[]` con índice GIN en `tasks` tras medir empíricamente ambos enfoques:
+- **Integridad categórica**: un array acepta cadenas arbitrarias o etiquetas eliminadas (`UPDATE 1`); la tabla puente con clave foránea devuelve `SQLSTATE 23503` en el motor ante cualquier identificador inexistente.
+- **Coste de renombrado**: actualizar el nombre de una etiqueta en `labels` es una única operación $O(1)$ de 0,346 ms independientemente del volumen de uso, mientras que en un array requiere escanear y actualizar todas las tareas etiquetadas (1,540 ms, 4,5 veces más lento y con coste lineal creciente).
+
+#### Claves compuestas contra asignaciones multidominio
+En un diseño con claves foráneas simples `FOREIGN KEY (task_id) REFERENCES tasks(id)` y `FOREIGN KEY (label_id) REFERENCES labels(id)`, una tarea del proyecto A aceptaría silenciosamente etiquetas del proyecto B. Para impedirlo en el motor:
+1. `tasks` declara `CONSTRAINT tasks_id_project_id_key UNIQUE (id, project_id)`.
+2. `labels` declara `CONSTRAINT labels_id_project_id_key UNIQUE (id, project_id)`.
+3. `task_labels` declara claves foráneas compuestas:
+   ```sql
+   CONSTRAINT task_labels_task_fkey
+     FOREIGN KEY (task_id, project_id)
+     REFERENCES tasks (id, project_id) ON DELETE CASCADE,
+   CONSTRAINT task_labels_label_fkey
+     FOREIGN KEY (label_id, project_id)
+     REFERENCES labels (id, project_id) ON DELETE CASCADE
+   ```
+Si se intenta asociar una etiqueta con el `project_id` de otra tarea, PostgreSQL rechaza la operación con `ERROR 23503: Key (label_id, project_id) is not present in table labels`.
+
+### Por qué la foránea de labels hacia projects es CASCADE y no RESTRICT (ADR-030)
+
+La migración `0009` declaró inicialmente `labels.project_id ... ON DELETE RESTRICT`, copiando por inercia la regla de `tasks`. Al ejecutar la prueba E2E de etiquetas, borrar un proyecto con etiquetas creadas y cero tareas devolvió `HTTP 500 INTERNAL_ERROR`, ya que el traductor de errores solo esperaba el `23503` de `tasks`.
+
+Traducir ese código habría sido tapar el síntoma. El repositorio ya distinguía formalmente dos naturalezas:
+1. **Contenido del usuario (`tasks`)**: `ON DELETE RESTRICT`. El borrado se rechaza con `409 PROJECT_HAS_TASKS` para proteger el trabajo y ofrecer salida explícita.
+2. **Configuración del tablero (`project_columns` y `labels`)**: `ON DELETE CASCADE`. Las columnas y etiquetas no tienen significado ni existencia fuera del proyecto.
+
+La migración `0010` ajusta la clave foránea a `ON DELETE CASCADE`. Un proyecto con etiquetas y sin tareas se elimina limpiamente con 204 sin dejar filas huérfanas; y si contiene tareas, la protección `RESTRICT` de `tasks` se dispara en primer lugar devolviendo 409 con las tareas intactas.
+
+### Paleta cerrada de 12 colores semánticos y unicidad de nombres
+
+- **Paleta cerrada de 12 tokens**: `CONSTRAINT labels_color_check CHECK (color IN ('slate', 'red', 'orange', 'amber', 'yellow', 'green', 'teal', 'cyan', 'blue', 'indigo', 'purple', 'pink'))`. La integridad de la paleta la garantiza PostgreSQL: la API, el seed y `psql` están sujetos a la misma restricción.
+- **Unicidad insensible a mayúsculas**: `CREATE UNIQUE INDEX labels_project_name_unique_ci ON labels (project_id, lower(btrim(name)))`. Genera colisión real (`409 LABEL_NAME_TAKEN`) capturando `SQLSTATE 23505` sin recurrir a consultas previas en memoria.
+
 ### Índices
 
 ```sql
-CREATE INDEX tasks_project_id_idx      ON tasks (project_id);
-CREATE INDEX tasks_project_status_idx  ON tasks (project_id, status);
+CREATE INDEX tasks_project_id_idx       ON tasks (project_id);
+CREATE INDEX tasks_project_status_idx   ON tasks (project_id, status);
+CREATE INDEX labels_project_id_idx      ON labels (project_id);
+CREATE INDEX task_labels_label_id_idx   ON task_labels (label_id);
+CREATE INDEX task_labels_project_id_idx ON task_labels (project_id);
 ```
 
-`tasks_project_id_idx` no es opcional: PostgreSQL **no** indexa automáticamente el lado hijo de una clave foránea, y sin él cada verificación de `ON DELETE RESTRICT` hace un recorrido secuencial. `tasks_project_status_idx` sirve a la consulta que domina la aplicación: las tareas de un proyecto agrupadas por estado.
+`tasks_project_id_idx` no es opcional: PostgreSQL **no** indexa automáticamente el lado hijo de una clave foránea, y sin él cada verificación de `ON DELETE RESTRICT` hace un recorrido secuencial. `tasks_project_status_idx` sirve a la consulta que domina la aplicación: las tareas de un proyecto agrupadas por estado. Asimismo, los índices de `labels` y `task_labels` previenen escaneos secuenciales durante la cascada de borrado y la búsqueda de asignaciones.
 
 ## 3. DDL completo
 
@@ -287,6 +332,58 @@ CREATE TRIGGER tasks_set_position
 CREATE TRIGGER tasks_set_updated_at
   BEFORE UPDATE ON tasks
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- migrations/0009_etiquetas.sql y 0010_etiquetas_cascada_al_borrar_proyecto.sql
+
+CREATE TABLE labels (
+  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid        NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+  name       text        NOT NULL,
+  color      text        NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT labels_name_not_blank CHECK (btrim(name) <> ''),
+  CONSTRAINT labels_name_max_len   CHECK (char_length(name) <= 50),
+  CONSTRAINT labels_color_check CHECK (
+    color IN (
+      'slate', 'red', 'orange', 'amber',
+      'yellow', 'green', 'teal', 'cyan',
+      'blue', 'indigo', 'purple', 'pink'
+    )
+  ),
+  CONSTRAINT labels_id_project_id_key UNIQUE (id, project_id)
+);
+
+CREATE UNIQUE INDEX labels_project_name_unique_ci
+  ON labels (project_id, lower(btrim(name)));
+
+CREATE INDEX labels_project_id_idx ON labels (project_id);
+
+CREATE TRIGGER labels_set_updated_at
+  BEFORE UPDATE ON labels
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+ALTER TABLE tasks
+  ADD CONSTRAINT tasks_id_project_id_key UNIQUE (id, project_id);
+
+CREATE TABLE task_labels (
+  task_id    uuid NOT NULL,
+  label_id   uuid NOT NULL,
+  project_id uuid NOT NULL,
+  PRIMARY KEY (task_id, label_id),
+
+  CONSTRAINT task_labels_task_fkey
+    FOREIGN KEY (task_id, project_id)
+    REFERENCES tasks (id, project_id) ON DELETE CASCADE,
+
+  CONSTRAINT task_labels_label_fkey
+    FOREIGN KEY (label_id, project_id)
+    REFERENCES labels (id, project_id) ON DELETE CASCADE
+);
+
+CREATE INDEX task_labels_label_id_idx ON task_labels (label_id);
+CREATE INDEX task_labels_project_id_idx ON task_labels (project_id);
 ```
 
 ## 4. Consulta de resumen de proyecto

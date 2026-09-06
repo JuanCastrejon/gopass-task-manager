@@ -36,6 +36,32 @@
 
   --color-danger: #b91c1c;
   --color-danger-soft: #fee2e2;
+
+  /* Etiquetas de color (SL-18) — pares de tokens semánticos con contraste AA verificado */
+  --color-label-slate: #334155;
+  --color-label-slate-soft: #f1f5f9;
+  --color-label-red: #991b1b;
+  --color-label-red-soft: #fee2e2;
+  --color-label-orange: #9a3412;
+  --color-label-orange-soft: #ffedd5;
+  --color-label-amber: #92400e;
+  --color-label-amber-soft: #fef3c7;
+  --color-label-yellow: #854d0e;
+  --color-label-yellow-soft: #fef9c3;
+  --color-label-green: #166534;
+  --color-label-green-soft: #dcfce7;
+  --color-label-teal: #115e59;
+  --color-label-teal-soft: #ccfbf1;
+  --color-label-cyan: #155e75;
+  --color-label-cyan-soft: #cffafe;
+  --color-label-blue: #1e40af;
+  --color-label-blue-soft: #dbeafe;
+  --color-label-indigo: #3730a3;
+  --color-label-indigo-soft: #e0e7ff;
+  --color-label-purple: #6b21a8;
+  --color-label-purple-soft: #f3e8ff;
+  --color-label-pink: #9d174d;
+  --color-label-pink-soft: #fce7f3;
 }
 
 @layer base {
