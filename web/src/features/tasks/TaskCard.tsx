@@ -208,11 +208,12 @@ export function TaskCard({
       // el desplazamiento del carrusel antes de que el usuario llegue a
       // mantener pulsado. El sensor táctil solo reclama el gesto cuando se
       // cumplen sus 250 ms.
-      className={`select-none rounded-lg border border-border bg-surface p-3 transition-colors
+      className={`select-none rounded-lg border border-border bg-surface p-2.5 shadow-card transition-shadow duration-150
+        hover:shadow-card-hover pointer-coarse:p-3
         ${isDragging ? 'opacity-40' : ''}
         ${pending ? 'pointer-events-none opacity-60' : 'cursor-grab active:cursor-grabbing'}`}
     >
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-start justify-between gap-1.5 pointer-coarse:gap-2">
         <div className="flex min-w-0 flex-1 items-start gap-1.5">
           {esCompletada ? (
             /*
@@ -247,7 +248,7 @@ export function TaskCard({
                   ? { 'aria-haspopup': 'menu', 'aria-expanded': menuAbierto }
                   : {})}
                 onClick={alPulsarCompletar}
-                className="group flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-muted transition hover:text-status-done focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none pointer-coarse:size-11"
+                className="group flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-muted transition hover:text-status-done pointer-coarse:size-11"
               >
                 <span className="flex size-4.5 shrink-0 items-center justify-center rounded-full border-2 border-ink-muted/40 transition group-hover:border-status-done group-hover:bg-status-done/10">
                   <Check className="size-2.5 stroke-[3] text-status-done opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
@@ -289,7 +290,7 @@ export function TaskCard({
           )}
 
           <h4
-            className={`min-w-0 pt-1 break-words text-sm ${
+            className={`min-w-0 pt-0.5 break-words text-sm leading-snug ${
               task.status === 'DONE' ? 'text-ink-muted line-through' : ''
             }`}
           >
@@ -312,22 +313,24 @@ export function TaskCard({
       )}
 
       {task.labels && task.labels.length > 0 && (
-        <div className="mt-2">
+        <div className="mt-1.5 pointer-coarse:mt-2">
           <LabelPills labels={task.labels} />
         </div>
       )}
 
-      <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-2" {...SIN_ARRASTRE}>
+      <div className="mt-2 flex items-center justify-between gap-1.5 border-t border-border/80 pt-1.5 pointer-coarse:mt-3 pointer-coarse:pt-2">
         {anterior ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="size-7 px-0 pointer-coarse:size-11"
-            onClick={() => onMove(anterior.id)}
-            aria-label={`Mover "${task.title}" a ${anterior.name}`}
-          >
-            <ArrowLeft className="size-3.5" aria-hidden />
-          </Button>
+          <div {...SIN_ARRASTRE}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="size-7 px-0 pointer-coarse:size-11"
+              onClick={() => onMove(anterior.id)}
+              aria-label={`Mover "${task.title}" a ${anterior.name}`}
+            >
+              <ArrowLeft className="size-3.5" aria-hidden />
+            </Button>
+          </div>
         ) : (
           <span className="size-7 pointer-coarse:size-11" />
         )}
@@ -338,15 +341,17 @@ export function TaskCard({
         </div>
 
         {siguiente ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="size-7 px-0 pointer-coarse:size-11"
-            onClick={() => onMove(siguiente.id)}
-            aria-label={`Mover "${task.title}" a ${siguiente.name}`}
-          >
-            <ArrowRight className="size-3.5" aria-hidden />
-          </Button>
+          <div {...SIN_ARRASTRE}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="size-7 px-0 pointer-coarse:size-11"
+              onClick={() => onMove(siguiente.id)}
+              aria-label={`Mover "${task.title}" a ${siguiente.name}`}
+            >
+              <ArrowRight className="size-3.5" aria-hidden />
+            </Button>
+          </div>
         ) : (
           <span className="size-7 pointer-coarse:size-11" />
         )}

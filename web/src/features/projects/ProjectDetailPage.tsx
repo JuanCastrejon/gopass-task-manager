@@ -10,6 +10,7 @@ import { DeleteProjectDialog } from './DeleteProjectDialog.tsx';
 import { useProject } from './api.ts';
 import { useColumns } from '../columns/api.ts';
 import { TaskBoard } from '../tasks/TaskBoard.tsx';
+import { BOARD_BACKGROUND_CLASSES } from '../../types/api.ts';
 
 /** Detalle del proyecto: cabecera con el avance y, debajo, el tablero de tareas. */
 export function ProjectDetailPage({ projectId }: { projectId: string }) {
@@ -18,15 +19,26 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const proyecto = useProject(projectId);
   const columnas = useColumns(projectId);
 
+  const background = proyecto.data?.background ?? 'neutro';
+  const bgClass = BOARD_BACKGROUND_CLASSES[background];
+
   return (
-    <div className="space-y-6">
-      <Link
-        to="/"
-        className="inline-flex items-center gap-1.5 text-sm text-ink-muted transition hover:text-ink"
-      >
-        <ArrowLeft className="size-4" aria-hidden />
-        Volver a proyectos
-      </Link>
+    <div
+      data-testid="project-board-area"
+      className={`min-h-[calc(100dvh-3.5rem)] -mx-5 -mt-7 -mb-7 px-5 pt-7 pb-12
+                 lg:-mx-[max(0px,calc((100vw-64rem)/2))]
+                 lg:px-[max(0px,calc((100vw-64rem)/2))]
+                 transition-colors duration-200
+                 ${bgClass}`}
+    >
+      <div className="space-y-6">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-ink-muted shadow-xs transition hover:text-ink hover:border-ink-muted/30"
+        >
+          <ArrowLeft className="size-4" aria-hidden />
+          Volver a proyectos
+        </Link>
 
       {proyecto.isPending && (
         <div className="space-y-3 rounded-xl border border-border bg-surface p-5">
@@ -116,6 +128,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
           )}
         </>
       )}
+      </div>
     </div>
   );
 }

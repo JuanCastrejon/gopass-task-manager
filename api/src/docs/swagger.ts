@@ -957,11 +957,17 @@ export const openApiSpec = {
     schemas: {
       Project: {
         type: 'object',
-        required: ['id', 'name', 'createdAt', 'updatedAt'],
+        required: ['id', 'name', 'background', 'createdAt', 'updatedAt'],
         properties: {
           id: { type: 'string', format: 'uuid' },
           name: { type: 'string', example: 'Telepeaje — integración de operadores' },
           description: { type: 'string', nullable: true, example: 'Conexión con concesionarios viales' },
+          background: {
+            type: 'string',
+            enum: ['neutro', 'azul', 'verde', 'ambar', 'purpura', 'rosa'],
+            example: 'neutro',
+            description: 'Fondo visual del tablero elegido de la paleta cerrada de seis fondos semánticos.',
+          },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
@@ -1064,6 +1070,13 @@ export const openApiSpec = {
         properties: {
           name: { type: 'string', minLength: 1, maxLength: 120, example: 'App de parqueaderos' },
           description: { type: 'string', maxLength: 2000, nullable: true, example: 'Flujo de pago' },
+          background: {
+            type: 'string',
+            enum: ['neutro', 'azul', 'verde', 'ambar', 'purpura', 'rosa'],
+            default: 'neutro',
+            example: 'azul',
+            description: 'Fondo visual del tablero. Si se omite, nace como neutro.',
+          },
         },
       },
       PatchProjectInput: {
@@ -1071,6 +1084,12 @@ export const openApiSpec = {
         properties: {
           name: { type: 'string', minLength: 1, maxLength: 120, example: 'Nuevo nombre' },
           description: { type: 'string', maxLength: 2000, nullable: true, example: null },
+          background: {
+            type: 'string',
+            enum: ['neutro', 'azul', 'verde', 'ambar', 'purpura', 'rosa'],
+            example: 'verde',
+            description: 'Nuevo fondo visual del tablero.',
+          },
         },
       },
       Task: {

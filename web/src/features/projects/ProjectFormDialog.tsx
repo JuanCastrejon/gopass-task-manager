@@ -3,7 +3,13 @@ import { Modal } from '../../components/ui/Modal.tsx';
 import { Button } from '../../components/ui/Button.tsx';
 import { fieldErrors, messageFor } from '../../lib/error-messages.ts';
 import { useCreateProject, useUpdateProject } from './api.ts';
-import type { ProjectSummary } from '../../types/api.ts';
+import {
+  BOARD_BACKGROUND_CLASSES,
+  PROJECT_BACKGROUND_NAMES,
+  PROJECT_BACKGROUNDS,
+  type ProjectBackground,
+  type ProjectSummary,
+} from '../../types/api.ts';
 
 interface Props {
   open: boolean;
@@ -18,6 +24,7 @@ export function ProjectFormDialog({ open, onClose, project }: Props) {
   const editing = project !== undefined;
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [background, setBackground] = useState<ProjectBackground>(project?.background ?? 'neutro');
 
   const create = useCreateProject();
   const update = useUpdateProject(project?.id ?? '');
@@ -29,11 +36,12 @@ export function ProjectFormDialog({ open, onClose, project }: Props) {
     if (!open) return;
     setName(project?.name ?? '');
     setDescription(project?.description ?? '');
+    setBackground(project?.background ?? 'neutro');
     mutation.reset();
     // `mutation` cambia de identidad en cada render; depender de él aquí
     // reiniciaría el formulario mientras se escribe.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, project?.id]);
+  }, [open, project?.id, project?.background]);
 
   const errores = fieldErrors(mutation.error);
   const nombreVacio = name.trim().length === 0;
@@ -54,12 +62,12 @@ export function ProjectFormDialog({ open, onClose, project }: Props) {
       // distingue "no lo toques" (ausente) de "bórralo" (null explícito). El
       // límite sigue la misma regla.
       update.mutate(
-        { name: name.trim(), description: limpio === '' ? null : limpio },
+        { name: name.trim(), description: limpio === '' ? null : limpio, background },
         { onSuccess: onClose },
       );
     } else {
       create.mutate(
-        { name: name.trim(), ...(limpio === '' ? {} : { description: limpio }) },
+        { name: name.trim(), ...(limpio === '' ? {} : { description: limpio }), background },
         { onSuccess: onClose },
       );
     }
@@ -107,6 +115,42 @@ export function ProjectFormDialog({ open, onClose, project }: Props) {
                        outline-none focus:border-brand"
             placeholder="Qué abarca este proyecto"
           />
+        </div>
+
+        <div>
+          <label id="project-background-label" className="mb-1.5 block text-sm font-medium">
+            Fondo del tablero
+          </label>
+          <div
+            role="radiogroup"
+            aria-labelledby="project-background-label"
+            className="grid grid-cols-3 gap-2 sm:grid-cols-6"
+          >
+            {PROJECT_BACKGROUNDS.map((bg) => {
+              const seleccionado = background === bg;
+              return (
+                <button
+                  key={bg}
+                  type="button"
+                  role="radio"
+                  aria-checked={seleccionado}
+                  aria-label={PROJECT_BACKGROUND_NAMES[bg]}
+                  onClick={() => setBackground(bg)}
+                  className={`flex flex-col items-center gap-1.5 rounded-lg border p-2 text-xs font-medium transition ${
+                    seleccionado
+                      ? 'border-brand ring-2 ring-brand ring-offset-1 text-ink font-semibold'
+                      : 'border-border bg-surface text-ink-muted hover:border-ink-muted/30 hover:text-ink'
+                  }`}
+                >
+                  <span
+                    className={`size-6 rounded-md border border-border shadow-xs ${BOARD_BACKGROUND_CLASSES[bg]}`}
+                    aria-hidden
+                  />
+                  <span className="truncate">{PROJECT_BACKGROUND_NAMES[bg]}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Errores que no son de un campo concreto: el 409 de nombre repetido

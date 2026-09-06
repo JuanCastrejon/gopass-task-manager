@@ -4,7 +4,7 @@ import { ProjectHasTasksError, ProjectNotFoundError } from '../../http/errors.js
 import type { ProjectRow, ProjectSummaryRow } from './projects.mapper.js';
 import type { CreateProjectInput, PatchProjectInput } from './projects.schema.js';
 
-const PROJECT_FIELDS = 'id, name, description, created_at, updated_at';
+const PROJECT_FIELDS = 'id, name, description, background, created_at, updated_at';
 
 /**
  * `COUNT(*)` devuelve `bigint`, y el driver `pg` entrega los `bigint` como
@@ -32,7 +32,7 @@ const PROJECT_FIELDS = 'id, name, description, created_at, updated_at';
  * convierte en 0 el NULL del proyecto sin tareas.
  */
 const SUMMARY_QUERY = `
-  SELECT p.id, p.name, p.description, p.created_at, p.updated_at,
+  SELECT p.id, p.name, p.description, p.background, p.created_at, p.updated_at,
          COALESCE(t.total, 0)::int         AS task_count,
          COALESCE(t.done,  0)::int         AS done_count,
          COALESCE(t.low,    0)::int        AS low_count,
@@ -74,10 +74,10 @@ export async function findProjectById(id: string): Promise<ProjectSummaryRow> {
 export async function createProject(input: CreateProjectInput): Promise<ProjectRow> {
   try {
     const result = await pool.query<ProjectRow>(
-      `INSERT INTO projects (name, description)
-       VALUES ($1, $2)
+      `INSERT INTO projects (name, description, background)
+       VALUES ($1, $2, $3)
        RETURNING ${PROJECT_FIELDS}`,
-      [input.name, input.description ?? null],
+      [input.name, input.description ?? null, input.background ?? 'neutro'],
     );
     // `INSERT ... RETURNING` siempre devuelve la fila creada o lanza.
     //
@@ -93,7 +93,8 @@ export async function createProject(input: CreateProjectInput): Promise<ProjectR
   }
 }
 
-const UPDATABLE = { name: 'name', description: 'description' } as const;
+const UPDATABLE = { name: 'name', description: 'description', background: 'background' } as const;
+
 
 export async function updateProject(id: string, patch: PatchProjectInput): Promise<ProjectRow> {
   const assignments: string[] = [];

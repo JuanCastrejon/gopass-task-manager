@@ -285,4 +285,30 @@ describe('TaskBoard — Reordenación y restricciones de arrastre (SL-15)', () =
       });
     });
   });
+
+  it('4. las columnas adoptan ancho fijo de 272 px con shrink-0 en desktop (lg) y no se estiran con 1fr', async () => {
+    pintar();
+
+    await screen.findByText('Tarea Manual 1');
+
+    // Comprobación sobre clases en JSDOM: JSDOM no dispone de motor de maquetación CSS
+    // por lo que las dimensiones computadas son 0; las utilidades semánticas de Tailwind
+    // representan el contrato fidedigno de geometría sin suposiciones artificiales.
+    const tablero = screen.getByRole('region', { name: 'Tablero de tareas' });
+    expect(tablero.className).toContain('lg:flex');
+    expect(tablero.className).toContain('lg:overflow-x-auto');
+    expect(tablero.className).toContain('lg:gap-3');
+    expect(tablero.className).not.toContain('lg:auto-cols');
+    expect(tablero.className).not.toContain('minmax');
+
+    const columnaPorHacer = screen.getByRole('region', { name: 'Por hacer' });
+    expect(columnaPorHacer.className).toContain('lg:w-[272px]');
+    expect(columnaPorHacer.className).toContain('lg:shrink-0');
+    expect(columnaPorHacer.className).not.toContain('lg:w-auto');
+    expect(columnaPorHacer.className).not.toContain('flex-1');
+
+    const columnaEnProgreso = screen.getByRole('region', { name: 'En progreso' });
+    expect(columnaEnProgreso.className).toContain('lg:w-[272px]');
+    expect(columnaEnProgreso.className).toContain('lg:shrink-0');
+  });
 });

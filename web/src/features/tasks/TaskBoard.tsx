@@ -319,8 +319,8 @@ export function TaskBoard({
         {/* El criterio de orden se dice en voz alta. Sin esto, una tarjeta que
             aparece dos posiciones más abajo de donde se soltó parece un fallo;
             con esto es una regla que el usuario puede predecir. */}
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold">Tareas</h2>
+        <div className="min-w-0 rounded-lg border border-border bg-surface px-3 py-1.5 shadow-xs">
+          <h2 className="text-sm font-semibold text-ink">Tareas</h2>
           <p className="text-xs text-ink-muted">
             Arrastra para mover entre columnas o reordena dentro de columnas con orden manual
           </p>
@@ -394,9 +394,9 @@ export function TaskBoard({
       )}
 
       {tareas.isPending && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-flow-col lg:auto-cols-[minmax(16rem,1fr)]">
+        <div className="grid grid-cols-1 gap-4 lg:flex lg:gap-3 lg:overflow-x-auto lg:pb-3">
           {columnas.map((c) => (
-            <div key={c.id} className="space-y-2 rounded-xl border border-border bg-canvas/60 p-3">
+            <div key={c.id} className="space-y-2 rounded-xl border border-border bg-canvas/60 p-3 lg:w-[272px] lg:shrink-0">
               <Skeleton className="h-3 w-24" />
               <Skeleton className="h-16 w-full rounded-lg" />
               <Skeleton className="h-16 w-full rounded-lg" />
@@ -436,15 +436,39 @@ export function TaskBoard({
              * hacia la columna centrada y la tarjeta da saltos.
              */
             /**
-             * `grid-flow-col` con `auto-cols-[minmax(16rem,1fr)]` y no
-             * `grid-cols-3`: con columnas configurables el número deja de ser
-             * conocido, y una rejilla de tres columnas fijas colapsaría al
-             * añadir la cuarta. Así, hasta cuatro o cinco se reparten el ancho
-             * y a partir de ahí el tablero se desplaza en horizontal
-             * conservando 256 px legibles por columna.
+             * Geometría fija estilo Trello (272 px, shrink-0, gap de 12 px) desde `lg`:
+             *
+             * Qué se gana y qué se pierde:
+             * Se gana ritmo y geometría estable: las tarjetas mantienen siempre sus
+             * proporciones tipográficas y espaciales ideales, sin estirarse deformadas
+             * cuando hay pocas listas en pantallas panorámicas ni comprimirse en exceso.
+             * Se pierde aprovechamiento de pantallas muy anchas: el tablero no se
+             * expande para llenar todo el ancho con 1fr, requiriendo desplazamiento
+             * horizontal cuando el conjunto de listas supera el viewport disponible.
+             *
+             * Por debajo de `lg` no se cambia nada: el apilado y carrusel de 82vw ya
+             * funciona y está probado para pantallas reducidas y táctiles.
+             */
+            /**
+             * A partir de `lg` el tablero rompe el contenedor de 64rem de la
+             * aplicacion y usa el ancho real de la ventana.
+             *
+             * Con columnas flexibles daba igual: se estiraban hasta llenar los
+             * 984 px utiles. Con 272 px fijos, en una pantalla de 1440 se veian
+             * tres columnas y media y aparecia desplazamiento con solo cuatro,
+             * desperdiciando 456 px. Un tablero es justo la vista que necesita
+             * el ancho, y por eso Trello lo pinta a sangre.
+             *
+             * El relleno que compensa el margen negativo va SOLO al inicio.
+             * Ponerlo tambien al final inflaba el ancho desplazable en el doble
+             * del margen y aparecia barra de desplazamiento aunque las cuatro
+             * columnas cupieran de sobra: 1540 px de contenido para 1400 de
+             * hueco. Al final basta un respiro pequeno.
              */
             className={`flex gap-4 overflow-x-auto pb-3
-                       lg:grid lg:grid-flow-col lg:auto-cols-[minmax(16rem,1fr)] lg:pb-0
+                       lg:flex lg:gap-3 lg:overflow-x-auto lg:pb-3
+                       lg:-mx-[max(0px,calc((100vw-64rem)/2))]
+                       lg:ps-[max(0px,calc((100vw-64rem)/2))] lg:pe-5
                        ${arrastrada ? 'snap-none' : 'snap-x snap-mandatory'}`}
           >
           {columnas.map((col, indice) => {
@@ -468,12 +492,12 @@ export function TaskBoard({
                 arrastrando={arrastrada !== null}
                 esDestinoDistinto={arrastrada !== null && arrastrada.columnId !== col.id}
               >
-                <header className="mb-2.5 flex items-center gap-2 px-0.5">
+                <header className="mb-2 flex items-center gap-1.5 px-0.5">
                   {/* El punto sigue el color de la CATEGORÍA, no del nombre:
                       «QA» y «En revisión» son ambas trabajo en curso y deben
                       leerse como tal de un vistazo. */}
                   <StatusDot status={col.category} />
-                  <h3 className="min-w-0 truncate text-xs font-medium uppercase tracking-wide text-ink-muted" title={col.name}>
+                  <h3 className="min-w-0 truncate text-xs font-semibold uppercase tracking-wide text-ink-muted" title={col.name}>
                     {col.name}
                   </h3>
                   {/*
@@ -515,7 +539,7 @@ export function TaskBoard({
                       })
                     }
                     aria-label={`Ordenar ${col.name} por`}
-                    className="w-full rounded border border-border bg-surface px-1.5 py-1 text-[11px] outline-none focus:border-brand"
+                    className="h-6 w-full rounded border border-border bg-surface px-1.5 py-0 text-[11px] text-ink-muted outline-none focus:text-ink focus:border-brand"
                   >
                     {COLUMN_SORTS.map((criterio) => (
                       <option key={criterio} value={criterio}>
@@ -528,7 +552,7 @@ export function TaskBoard({
                 {/* Si la columna no tiene orden manual, se avisa de forma visible
                     por qué el reordenado vertical no está disponible (SL-15). */}
                 {col.sort !== 'manual' && (
-                  <p className="mb-2 px-0.5 text-[11px] text-ink-muted">
+                  <p className="mb-2 px-0.5 text-[10px] leading-tight text-ink-muted">
                     {col.sort.startsWith('priority')
                       ? 'Ordenada por prioridad — cambia el orden a manual para reordenar'
                       : 'Ordenada por fecha — cambia el orden a manual para reordenar'}
@@ -671,9 +695,10 @@ function ColumnaDestino({
       aria-label={columna.name}
       /**
        * La columna es la unidad de destino para movimientos inter-columna.
-       * Al sobrevolarla desde otra columna, se resalta con un anillo y un mensaje indicador.
+       * En desktop (`lg`), adopta un ancho fijo de 272 px con shrink-0 (estilo Trello)
+       * y resalta con anillo al arrastrar sobre ella.
        */
-      className={`relative flex w-[82vw] shrink-0 snap-center flex-col rounded-xl border p-3 transition-colors lg:w-auto
+      className={`relative flex w-[82vw] shrink-0 snap-center flex-col rounded-xl border p-3 transition-colors lg:w-[272px] lg:shrink-0
         ${isOver ? 'border-brand bg-brand/5 ring-2 ring-brand/40' : 'border-border bg-canvas/60'}
         ${arrastrando && !isOver ? 'border-dashed' : ''}`}
     >

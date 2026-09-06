@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { CheckSquare } from 'lucide-react';
 import { Link, useRoute } from './lib/router.tsx';
+import { ThemeToggle } from './components/ui/ThemeToggle.tsx';
 import { ProjectsPage } from './features/projects/ProjectsPage.tsx';
 import { ProjectDetailPage } from './features/projects/ProjectDetailPage.tsx';
 
@@ -22,11 +23,12 @@ export function App() {
   return (
     <div className="min-h-dvh">
       <header className="border-b border-border bg-surface">
-        <div className="mx-auto flex h-14 max-w-5xl items-center px-5">
+        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-5">
           <Link to="/" className="flex items-center gap-2 font-semibold tracking-tight">
             <CheckSquare className="size-5 text-brand" aria-hidden />
             GoPass Task Manager
           </Link>
+          <ThemeToggle />
         </div>
       </header>
 

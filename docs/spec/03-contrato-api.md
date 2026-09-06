@@ -48,6 +48,7 @@ Sin embargo, para las etiquetas de una tarea se utiliza `PUT /api/tasks/:id/labe
   "id": "8f14e45f-ceea-467a-9a1d-9e3f3f4a2b10",
   "name": "Telepeaje — integración de operadores",
   "description": "Conexión con los concesionarios viales",
+  "background": "azul",
   "taskCount": 8,
   "doneCount": 3,
   "byPriority": { "LOW": 2, "MEDIUM": 3, "HIGH": 3 },
@@ -56,6 +57,14 @@ Sin embargo, para las etiquetas de una tarea se utiliza `PUT /api/tasks/:id/labe
   "updatedAt": "2026-09-04T14:02:11.482Z"
 }
 ```
+
+`background` (SL-19 paso 3) representa el fondo visual del tablero del proyecto. Pertenece a una
+paleta cerrada de seis identificadores semánticos: `neutro` (por defecto), `azul`, `verde`, `ambar`,
+`purpura` y `rosa`. Vive en la base de datos como columna de `projects` con restricción `CHECK` en el
+motor relacional (RNF-03) y no en `localStorage`: el fondo es identidad compartida del tablero para
+todo el equipo, exactamente al revés del tema claro/oscuro que es una preferencia de accesibilidad y
+ergonomía personal de cada navegador. Cualquier valor fuera de la paleta es rechazado con 400
+`VALIDATION_ERROR`.
 
 `byPriority` viaja en el listado y en el detalle, porque ambos salen de la misma consulta. Las tres
 claves están siempre presentes, también en 0: una clave ausente obligaría a cada consumidor a
