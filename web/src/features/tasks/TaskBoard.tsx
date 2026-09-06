@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -10,13 +10,14 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import { Plus, Search } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { Button } from '../../components/ui/Button.tsx';
 import { ErrorState, Skeleton } from '../../components/ui/States.tsx';
-import { PRIORITY_LABEL, STATUS_LABEL, StatusDot } from '../../components/ui/Badge.tsx';
+import { STATUS_LABEL, StatusDot } from '../../components/ui/Badge.tsx';
+import { CampoBusqueda, GrupoDePrioridad } from '../../components/ui/Filtros.tsx';
 import { messageFor } from '../../lib/error-messages.ts';
-import { useSearchParams } from '../../lib/router.tsx';
-import { TASK_PRIORITIES, TASK_STATUSES, type Task, type TaskPriority, type TaskStatus } from '../../types/api.ts';
+import { useFiltrosDeUrl } from '../../lib/use-filtros-de-url.ts';
+import { TASK_STATUSES, type Task, type TaskStatus } from '../../types/api.ts';
 import { TaskCard } from './TaskCard.tsx';
 import { TaskFormDialog } from './TaskFormDialog.tsx';
 import { useDeleteTask, useTasks, useUpdateTask } from './api.ts';
@@ -24,45 +25,21 @@ import { useDeleteTask, useTasks, useUpdateTask } from './api.ts';
 export function TaskBoard({ projectId }: { projectId: string }) {
   /**
    * Los filtros viven en la URL, no en `useState`: así el tablero filtrado
-   * sobrevive a una recarga y se puede compartir por enlace. Se escriben con
-   * `replaceState`, de modo que teclear en el buscador no llena el historial.
+   * sobrevive a una recarga y se puede compartir por enlace. El hook los
+   * comparte con el panel de proyectos, incluido el retardo y la lectura de
+   * `window.location` dentro del temporizador que evita que un chip recién
+   * pulsado se desmarque solo.
    *
    * **No hay filtro por estado**, y es deliberado: las tres columnas ya SON la
    * dimensión de estado. Filtrar por `DONE` dejaría dos columnas vacías y el
    * tablero parecería roto en vez de filtrado.
    */
-  const [params, setParams] = useSearchParams();
-  const prioridad = params.get('priority') as TaskPriority | null;
-  const busquedaUrl = params.get('q') ?? '';
+  const { busqueda, setBusqueda, busquedaUrl, prioridad, cambiarPrioridad, hayFiltro } =
+    useFiltrosDeUrl();
 
-  const [busqueda, setBusqueda] = useState(busquedaUrl);
-
-  // La URL puede cambiar por fuera de este input: el botón «atrás» del
-  // navegador, o un enlace compartido. Sin esto, el campo seguiría mostrando
-  // el texto anterior mientras la lista ya se ha refrescado sin filtrar.
-  useEffect(() => {
-    setBusqueda(busquedaUrl);
-  }, [busquedaUrl]);
-
-  // Se escribe en la URL con retardo: sin esto cada tecla dispararía una
-  // petición y una entrada de historial.
-  useEffect(() => {
-    if (busqueda.trim() === busquedaUrl) return;
-    const t = setTimeout(() => {
-      // Los parámetros se leen de `window.location` DENTRO del temporizador,
-      // no del render que lo programó. Con la versión capturada en el cierre,
-      // activar un chip de prioridad mientras se escribe hacía que el
-      // temporizador pendiente reescribiera la URL sin esa prioridad y el
-      // filtro se desmarcara solo 250 ms después. Reproducido y corregido.
-      const next = new URLSearchParams(window.location.search);
-      if (busqueda.trim()) next.set('q', busqueda.trim());
-      else next.delete('q');
-      setParams(next);
-    }, 250);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busqueda, busquedaUrl]);
-
+  // Aquí se filtra en el servidor y por eso se consulta con `busquedaUrl`, ya
+  // retardada: una colección de tareas puede crecer sin techo y `q` viaja al
+  // `ILIKE`. En el panel de proyectos la decisión es la contraria.
   const tareas = useTasks(projectId, {
     ...(busquedaUrl ? { q: busquedaUrl } : {}),
     ...(prioridad ? { priority: [prioridad] } : {}),
@@ -109,13 +86,6 @@ export function TaskBoard({ projectId }: { projectId: string }) {
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
   );
-
-  function cambiarPrioridad(valor: TaskPriority | null): void {
-    const next = new URLSearchParams(window.location.search);
-    if (valor) next.set('priority', valor);
-    else next.delete('priority');
-    setParams(next);
-  }
 
   /**
    * `origen` decide el foco. Con las flechas, el botón pulsado se desmonta al
@@ -179,36 +149,22 @@ export function TaskBoard({ projectId }: { projectId: string }) {
     borrar.mutate(task.id);
   }
 
-  const hayFiltro = busquedaUrl !== '' || prioridad !== null;
-
   return (
     <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-semibold">Tareas</h2>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-muted" aria-hidden />
-            <input
-              type="search"
-              value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Buscar"
-              aria-label="Buscar tareas por título"
-              className="h-8 w-40 rounded-lg border border-border bg-surface pl-8 pr-2.5 text-xs outline-none focus:border-brand"
-            />
-          </div>
-
-          <div className="flex gap-1" role="group" aria-label="Filtrar por prioridad">
-            <FiltroChip activo={prioridad === null} onClick={() => cambiarPrioridad(null)}>
-              Todas
-            </FiltroChip>
-            {TASK_PRIORITIES.map((p) => (
-              <FiltroChip key={p} activo={prioridad === p} onClick={() => cambiarPrioridad(p)}>
-                {PRIORITY_LABEL[p]}
-              </FiltroChip>
-            ))}
-          </div>
+          <CampoBusqueda
+            value={busqueda}
+            onChange={setBusqueda}
+            ariaLabel="Buscar tareas por título"
+          />
+          <GrupoDePrioridad
+            valor={prioridad}
+            onChange={cambiarPrioridad}
+            ariaLabel="Filtrar tareas por prioridad"
+          />
         </div>
       </div>
 
@@ -391,30 +347,5 @@ function ColumnaDestino({
     >
       {children}
     </section>
-  );
-}
-
-function FiltroChip({
-  activo,
-  onClick,
-  children,
-}: {
-  activo: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={activo}
-      className={`h-8 rounded-lg px-2.5 text-xs font-medium transition ${
-        activo
-          ? 'bg-brand text-white'
-          : 'border border-border bg-surface text-ink-muted hover:text-ink'
-      }`}
-    >
-      {children}
-    </button>
   );
 }
