@@ -54,7 +54,7 @@ Crear proyectos, asociarles tareas con estado y prioridad, y ver el trabajo de f
 
 ## Vídeo de demostración
 
-**[docs/assets/demo.mp4](docs/assets/demo.mp4)** — 2 min 52 s, con locución. Añadir una columna y renombrarla desde su cabecera, ponerle un límite de trabajo en curso y agotarlo hasta que el tablero rechaza la tercera tarjeta, el contrato publicado en Swagger, y el conflicto que devuelve la base al intentar borrar un proyecto que todavía tiene tareas.
+**[docs/assets/demo.mp4](docs/assets/demo.mp4)** — 2 min 48 s, con locución. Añadir una columna y renombrarla desde su cabecera, poner el límite de trabajo en curso desde «Editar proyecto» y agotarlo hasta que el tablero rechaza la tercera tarjeta, el contrato publicado en Swagger, y el conflicto que devuelve la base al intentar borrar un proyecto que todavía tiene tareas.
 
 Está dentro del repositorio a propósito: la entrega no depende de ningún servicio externo que pueda caducar o cambiar de permisos. GitHub no reproduce en línea un MP4 enlazado desde el README, así que el enlace lo abre o lo descarga.
 

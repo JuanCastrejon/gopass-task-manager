@@ -45,7 +45,7 @@ test('la plantilla «flujo controlado» deja el límite puesto, visible y editab
   await expect(enCurso).toContainText('0/2');
 
   // 3. Y está donde Juan lo busca: al pulsar «Editar», con su valor cargado.
-  await page.getByRole('button', { name: 'Editar' }).click();
+  await page.getByRole('button', { name: 'Editar proyecto' }).click();
   const edicion = page.getByRole('dialog');
   const campo = edicion.getByLabel('Límite de trabajo en curso de En curso');
   await expect(campo).toHaveValue('2');
@@ -89,7 +89,7 @@ test('sin plantilla, el proyecto nace sin ningún límite', async ({ page }) => 
   await expect(enCurso).not.toContainText('/');
 
   // El campo existe en la edición, vacío, listo para ponerlo cuando haga falta.
-  await page.getByRole('button', { name: 'Editar' }).click();
+  await page.getByRole('button', { name: 'Editar proyecto' }).click();
   await expect(
     page.getByRole('dialog').getByLabel('Límite de trabajo en curso de En curso'),
   ).toHaveValue('');
