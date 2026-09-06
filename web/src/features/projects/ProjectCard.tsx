@@ -2,7 +2,6 @@ import { useState, type MouseEvent } from 'react';
 import { ArrowRight, Pencil, Trash2 } from 'lucide-react';
 import { Link } from '../../lib/router.tsx';
 import { Button } from '../../components/ui/Button.tsx';
-import { PriorityBadge } from '../../components/ui/Badge.tsx';
 import { ProgressBar } from '../../components/ui/ProgressBar.tsx';
 import { ProjectFormDialog } from './ProjectFormDialog.tsx';
 import { DeleteProjectDialog } from './DeleteProjectDialog.tsx';
@@ -77,27 +76,46 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
           {project.description ?? 'Sin descripción'}
         </p>
 
-        {/* Solo la prioridad alta, y solo si la hay.
-            Aquí hubo un desglose de las tres prioridades, que existía para
-            explicar por qué un chip de prioridad escondía la tarjeta. Retirado
-            el chip, tres píldoras por tarjeta son composición, no decisión: en
-            una rejilla de ocho proyectos son veinticuatro etiquetas compitiendo
-            con la barra de avance. Lo que sí se decide de un vistazo en un
-            catálogo es dónde hay trabajo urgente. */}
-        {project.byPriority.HIGH > 0 && (
-          <div className="mt-2.5">
-            <PriorityBadge priority="HIGH" count={project.byPriority.HIGH} />
-          </div>
-        )}
+        {/* La señal de prioridad alta vive **dentro de la fila de métricas**, no
+            como bloque propio.
 
+            Antes hubo aquí un desglose de las tres prioridades, que existía para
+            explicar por qué un chip de prioridad escondía la tarjeta. Retirado
+            el chip, tres píldoras por tarjeta son composición y no decisión: en
+            una rejilla de ocho proyectos son veinticuatro etiquetas compitiendo
+            con la barra de avance. Lo que se decide desde un catálogo es a qué
+            proyecto entrar, y para eso basta saber si hay trabajo de prioridad
+            alta esperando.
+
+            Se descartaron el borde de color, la franja lateral y la barra
+            segmentada: los tres tiñen el proyecto entero de una propiedad que
+            es de sus tareas. Y se descartó la palabra «urgente», que el dominio
+            no define: solo existe `HIGH`. */}
         <div className="mt-auto space-y-1.5 pt-4">
-          <div className="flex items-baseline justify-between text-xs">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
             <span className="text-ink-muted">
               {project.taskCount === 0
                 ? 'Sin tareas'
                 : `${project.doneCount} de ${project.taskCount} completadas`}
             </span>
-            <span className="font-medium tabular-nums">{project.progress}%</span>
+
+            {project.byPriority.HIGH > 0 && (
+              <span
+                className="inline-flex items-center gap-1 font-medium text-priority-high"
+                // El punto es decorativo; el texto ya dice lo mismo, así que
+                // nadie depende del color para leerlo.
+                aria-label={`${project.byPriority.HIGH} ${
+                  project.byPriority.HIGH === 1 ? 'tarea' : 'tareas'
+                } de prioridad alta`}
+              >
+                <span aria-hidden className="size-1.5 rounded-full bg-priority-high" />
+                <span aria-hidden>
+                  {project.byPriority.HIGH} {project.byPriority.HIGH === 1 ? 'alta' : 'altas'}
+                </span>
+              </span>
+            )}
+
+            <span className="ml-auto font-medium tabular-nums">{project.progress}%</span>
           </div>
           <ProgressBar value={project.progress} label={`Avance de ${project.name}`} />
         </div>

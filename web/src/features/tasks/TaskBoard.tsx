@@ -152,7 +152,15 @@ export function TaskBoard({ projectId }: { projectId: string }) {
   return (
     <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold">Tareas</h2>
+        {/* El criterio de orden se dice en voz alta. Sin esto, una tarjeta que
+            aparece dos posiciones más abajo de donde se soltó parece un fallo;
+            con esto es una regla que el usuario puede predecir. */}
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold">Tareas</h2>
+          <p className="text-xs text-ink-muted">
+            Orden automático: prioridad alta primero, y dentro de cada prioridad, las más recientes
+          </p>
+        </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <CampoBusqueda
@@ -341,10 +349,26 @@ function ColumnaDestino({
     <section
       ref={setNodeRef}
       aria-label={STATUS_LABEL[estado]}
-      className={`flex w-[82vw] shrink-0 snap-center flex-col rounded-xl border p-3 transition-colors lg:w-auto
-        ${isOver ? 'border-brand bg-brand/5' : 'border-border bg-canvas/60'}
+      /**
+       * La columna es la unidad de destino, y tiene que verse así.
+       *
+       * Arrastrar cambia el **estado** de la tarea, no su posición: el orden lo
+       * fija PostgreSQL (`priority DESC, created_at DESC`). Una interfaz que
+       * abriera huecos entre tarjetas o desplazara a las vecinas prometería un
+       * control de orden que el modelo no tiene, y la tarjeta acabaría en un
+       * sitio distinto del señalado. Por eso al sobrevolar se realza la columna
+       * **entera** con un anillo, y nunca se dibuja un punto de inserción.
+       */
+      className={`relative flex w-[82vw] shrink-0 snap-center flex-col rounded-xl border p-3 transition-colors lg:w-auto
+        ${isOver ? 'border-brand bg-brand/5 ring-2 ring-brand/40' : 'border-border bg-canvas/60'}
         ${arrastrando && !isOver ? 'border-dashed' : ''}`}
     >
+      {/* Dice a dónde va la tarjeta, que es lo único que el gesto decide. */}
+      {isOver && (
+        <p className="pointer-events-none absolute inset-x-3 top-3 z-10 rounded-lg bg-brand px-2.5 py-1 text-center text-xs font-medium text-white shadow">
+          Soltar para mover a {STATUS_LABEL[estado]}
+        </p>
+      )}
       {children}
     </section>
   );

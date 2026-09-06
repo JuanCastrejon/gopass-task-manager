@@ -48,8 +48,8 @@ test('la búsqueda del inicio aísla proyectos por nombre y sobrevive a la recar
   // La señal de urgencia sale del agregado de PostgreSQL, no del cliente: el
   // proyecto con una tarea de prioridad alta la muestra, y el que solo tiene
   // una de prioridad baja no muestra nada.
-  await expect(tarjetaAlta.getByLabel('Alta: 1 tarea')).toBeVisible();
-  await expect(tarjetaBaja.getByLabel(/^Alta:/)).toHaveCount(0);
+  await expect(tarjetaAlta.getByLabel('1 tarea de prioridad alta')).toBeVisible();
+  await expect(tarjetaBaja.getByLabel(/prioridad alta/)).toHaveCount(0);
 
   // --- fuera del proyecto solo se busca por nombre ---
   await page.getByLabel('Buscar proyectos por nombre').fill(conAlta);

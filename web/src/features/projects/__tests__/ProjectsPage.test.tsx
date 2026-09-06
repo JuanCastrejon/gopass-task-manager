@@ -137,19 +137,19 @@ describe('ProjectsPage — búsqueda', () => {
     expect(window.location.search).toBe('');
   });
 
-  it('la tarjeta señala el trabajo urgente, y solo ese', () => {
+  it('la tarjeta señala si hay tareas de prioridad alta, y solo eso', () => {
     pintar();
     const [telepeaje, parqueaderos] = screen.getAllByRole('article');
 
-    // Telepeaje tiene dos de prioridad alta: se señalan.
-    expect(within(telepeaje!).getByLabelText('Alta: 2 tareas')).toBeTruthy();
+    // Telepeaje tiene dos de prioridad alta: se señalan, junto al avance.
+    expect(within(telepeaje!).getByLabelText('2 tareas de prioridad alta')).toBeTruthy();
 
     // Baja y media son estado operativo normal, no decisión: no se pintan.
-    expect(within(telepeaje!).queryByLabelText(/^Baja:/)).toBeNull();
-    expect(within(telepeaje!).queryByLabelText(/^Media:/)).toBeNull();
+    expect(within(telepeaje!).queryByLabelText(/prioridad baja/)).toBeNull();
+    expect(within(telepeaje!).queryByLabelText(/prioridad media/)).toBeNull();
 
     // Parqueaderos solo tiene medias: la tarjeta no señala nada.
-    expect(within(parqueaderos!).queryByLabelText(/^Alta:/)).toBeNull();
+    expect(within(parqueaderos!).queryByLabelText(/prioridad alta/)).toBeNull();
   });
 
   it('la tarjeta entera es un enlace al proyecto, sin anidar los botones dentro', () => {
