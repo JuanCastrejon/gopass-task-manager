@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { env } from '../config/env.js';
+
 /**
  * Parser de tipos para el driver `pg`:
  *
@@ -23,14 +24,41 @@ import { env } from '../config/env.js';
 pg.types.setTypeParser(1082, (val: string) => val);
 
 /**
- * Un único pool para todo el proceso. Los repositorios reciben este pool
- * o un cliente de transacción; ninguno abre conexiones por su cuenta.
+ * Resuelve la configuración de conexión del pool según el DESTINO de la base de datos.
+ *
+ * NOTA CRÍTICA DE ARQUITECTURA: `NODE_ENV === 'production'` NO decide si la base habla TLS.
+ * `NODE_ENV=production` describe el modo de compilación y optimización de Node.js (activo
+ * tanto en `docker-compose.yml` como en `api/Dockerfile`). El contenedor `db` local corre
+ * un PostgreSQL estándar sin SSL; exigir TLS bajo `NODE_ENV=production` provoca el fallo
+ * irrecuperable "The server does not support SSL connections" al levantar `docker compose up --build`.
+ *
+ * El criterio para activar TLS se apoya exclusivamente en propiedades del DESTINO:
+ * 1. `APP_ENV === 'production'`, variable inyectada únicamente en el despliegue serverless de Vercel.
+ * 2. Que la URL apunte a `supabase.com` o solicite explícitamente `sslmode` en sus query parameters.
  */
-function resolvePoolConfig(): pg.PoolConfig {
-  const isProduction = env.NODE_ENV === 'production' || process.env.APP_ENV === 'production' || env.DATABASE_URL.includes('supabase.com');
-  if (isProduction) {
+export function resolvePoolConfig(
+  rawUrl: string = env.DATABASE_URL,
+  appEnv: string | undefined = process.env.APP_ENV,
+): pg.PoolConfig {
+  let isRemoteTls = false;
+
+  if (appEnv === 'production' || rawUrl.includes('supabase.com')) {
+    isRemoteTls = true;
+  } else {
     try {
-      const url = new URL(env.DATABASE_URL);
+      const parsed = new URL(rawUrl);
+      const mode = parsed.searchParams.get('sslmode');
+      if (mode && mode !== 'disable') {
+        isRemoteTls = true;
+      }
+    } catch {
+      // Si la URL no parsea vía WHATWG, no se activa TLS por defecto
+    }
+  }
+
+  if (isRemoteTls) {
+    try {
+      const url = new URL(rawUrl);
       if (url.searchParams.get('sslmode') === 'require') {
         url.searchParams.set('sslmode', 'no-verify');
       }
@@ -43,7 +71,7 @@ function resolvePoolConfig(): pg.PoolConfig {
       };
     } catch {
       return {
-        connectionString: env.DATABASE_URL,
+        connectionString: rawUrl,
         max: 10,
         idleTimeoutMillis: 30_000,
         connectionTimeoutMillis: 5_000,
@@ -53,7 +81,7 @@ function resolvePoolConfig(): pg.PoolConfig {
   }
 
   return {
-    connectionString: env.DATABASE_URL,
+    connectionString: rawUrl,
     max: 10,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
