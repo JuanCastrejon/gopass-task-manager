@@ -5,9 +5,11 @@ set -e
 # healthcheck confirma que el motor acepta conexiones, no que este contenedor
 # pueda autenticarse. Se reintenta un número acotado de veces en vez de
 # asumirlo.
+# Se usa `--no-single-transaction` para que cada archivo de migración corra
+# en su propia transacción (0006 confirma el ENUM antes de que 0007 lo use en SET DEFAULT).
 echo "[api] aplicando migraciones"
 i=1
-until ./node_modules/.bin/node-pg-migrate up; do
+until ./node_modules/.bin/node-pg-migrate --no-single-transaction up; do
   if [ "$i" -ge 10 ]; then
     echo "[api] las migraciones fallaron tras $i intentos" >&2
     exit 1
