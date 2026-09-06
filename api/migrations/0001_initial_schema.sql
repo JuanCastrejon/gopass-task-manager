@@ -18,7 +18,7 @@ CREATE TYPE task_priority AS ENUM ('LOW', 'MEDIUM', 'HIGH');
 -- El orden de declaración de un ENUM es su orden de comparación, así que
 -- `ORDER BY priority DESC` devuelve HIGH primero sin necesidad de un CASE.
 
-CREATE FUNCTION set_updated_at() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
 BEGIN
   NEW.updated_at := now();
   RETURN NEW;
@@ -94,7 +94,7 @@ CREATE TRIGGER tasks_set_updated_at
 -- Sellar `completed_at` desde el servicio dejaría fuera al seed, a `psql` y
 -- a cualquier migración de datos: esas escrituras violarían el CHECK y
 -- producirían un 500 en vez de un dato correcto.
-CREATE FUNCTION set_task_completed_at() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION set_task_completed_at() RETURNS trigger AS $$
 BEGIN
   IF NEW.status = 'DONE' THEN
     -- Solo se sella en la transición: reeditar una tarea ya completada no

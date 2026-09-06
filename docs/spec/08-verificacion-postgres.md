@@ -555,3 +555,59 @@ Verificado contra PostgreSQL 16: cuando un proyecto existe pero ninguna de sus t
 
 
 
+
+---
+
+## 18. Mediciones de contraste en tema oscuro y derivación de variables CSS
+
+Durante la implementación de SL-19 (capa visual y modo oscuro), se evaluó empíricamente la estrategia de derivación cromática de las 18 combinaciones semánticas (prioridades, estados e insignias de etiquetas).
+
+### Banco de pruebas de ratios de contraste (WCAG 2.1 AA)
+
+Los dieciocho pares, no una muestra. Cada ratio se calcula sobre los valores que declara
+`web/src/index.css`: el texto contra su propio fondo `-soft`, con `--color-surface` en `#1a1d21`,
+resolviendo `color-mix(in srgb, …)` como interpolación lineal en sRGB —el espacio que la propia
+declaración nombra— y aplicando la fórmula de luminancia relativa de WCAG 2.1.
+
+Ordenados por el peor resultado de la estrategia adoptada:
+
+| Par semántico | A: solo derivar el fondo | B adoptada: texto al 50 % hacia blanco | AA (≥ 4,5:1) |
+|---|---|---|---|
+| `label-red` | 1,90:1 | **5,85:1** | APROBADO |
+| `label-pink` | 2,00:1 | **5,90:1** | APROBADO |
+| `label-purple` | 1,80:1 | **5,90:1** | APROBADO |
+| `label-indigo` | 1,60:1 | **5,90:1** | APROBADO |
+| `label-slate` | 1,52:1 | **5,98:1** | APROBADO |
+| `label-blue` | 1,78:1 | **6,06:1** | APROBADO |
+| `priority-high` | 2,39:1 | **6,11:1** | APROBADO |
+| `danger` | 2,39:1 | **6,11:1** | APROBADO |
+| `label-orange` | 2,10:1 | **6,28:1** | APROBADO |
+| `label-teal` | 1,99:1 | **6,31:1** | APROBADO |
+| `priority-medium` | 2,23:1 | **6,34:1** | APROBADO |
+| `label-cyan` | 2,06:1 | **6,37:1** | APROBADO |
+| `label-green` | 2,11:1 | **6,39:1** | APROBADO |
+| `label-amber` | 2,14:1 | **6,40:1** | APROBADO |
+| `priority-low` | 1,99:1 | **6,42:1** | APROBADO |
+| `label-yellow` | 2,18:1 | **6,46:1** | APROBADO |
+| `status-done` | 2,65:1 | **6,74:1** | APROBADO |
+| `status-progress` | 2,85:1 | **6,82:1** | APROBADO |
+
+Resumen: la estrategia A aprueba **0 de 18** y no llega a 3:1 en ningún par —su rango entero es
+1,52:1 a 2,85:1—. La estrategia B aprueba **18 de 18**, con el peor caso en `label-red` a 5,85:1 y
+el mejor en `status-progress` a 6,82:1.
+
+### Conclusiones técnicas
+
+1. **Falsación de la premisa de derivación simple.** Derivar solo el fondo con
+   `color-mix(in srgb, var(--base) 18%, var(--color-surface))` falla los dieciocho pares, sin una
+   sola excepción. Los tonos base se eligieron como texto oscuro sobre pastel claro; puestos sobre
+   una superficie oscura sin aclarar, su luminancia es insuficiente. El peor par bajo esta
+   estrategia, `label-slate` a 1,52:1, está por debajo incluso del mínimo de 3:1 que WCAG concede a
+   los elementos no textuales.
+2. **Eficacia de la redefinición mínima.** Aclarar el texto al 50 % hacia blanco
+   (`color-mix(in srgb, white 50%, var(--base))`) sube todos los pares por encima de 5,85:1. El
+   bloque `[data-theme="dark"]` introduce **seis valores hexadecimales nuevos y solo seis**
+   —`surface`, `canvas`, `border`, `ink`, `ink-muted` y `brand`—; los treinta y seis
+   `color-mix` restantes se derivan de las variables `--base-*` que ya existían para el tema claro.
+   Ese es el sentido de «seis y no cuarenta y cinco»: se cuentan literales nuevos que mantener, no
+   líneas escritas.

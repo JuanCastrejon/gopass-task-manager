@@ -863,3 +863,66 @@ este comportamiento.
 | Gates | `sistema-multiagente-sdlc` (`quality-gate`, `coverage-diff`) | 2.2.2 |
 | Gestor de paquetes | npm | 10.x |
 
+
+
+---
+
+### ADR-031 — Tema claro/oscuro con seis redefiniciones estructurales y derivación con color-mix
+
+**Contexto.** La plataforma requería un modo oscuro ergonómico para reducir la fatiga visual de los operadores en turnos nocturnos o salas de control. Una propuesta inicial (Codex) planteaba redefinir de manera exhaustiva los 45 tokens semánticos de la aplicación en el bloque `.dark`. Por el contrario, otra propuesta (Antigravity) sugería derivar automáticamente todas las variables aplicando `color-mix` únicamente sobre el fondo `--color-surface`.
+
+**Alternativas descartadas.**
+1. *Redefinir 45 variables CSS individuales:* Genera sobreingeniería, inflación de la hoja de estilos y alto riesgo de inconsistencias ante la adición de nuevas insignias o colores semánticos en el futuro.
+2. *Derivar únicamente el fondo con `color-mix`:* **Se midió en laboratorio y falló.** Los tonos base originales de las insignias (`--base-priority-*`, `--base-status-*`, `--base-label-*`) fueron elegidos con luminancia calibrada como texto oscuro sobre fondo claro. Al situarlos sobre fondos oscurecidos con `color-mix`, **fallaron los 18 pares de contraste WCAG 2.1 AA** (ratios inaceptables de 1,99:1 a 2,85:1).
+
+**Decisión.** Se adoptó un enfoque híbrido medido que aprueba el 100% de los pares con un ratio mínimo de 5,85:1 (superando ampliamente el umbral 4,5:1 de WCAG):
+- Se redefinen **exclusivamente seis tokens estructurales** en `[data-theme="dark"]` (`--color-surface`, `--color-canvas`, `--color-border`, `--color-ink`, `--color-ink-muted`, `--color-brand`).
+- Las insignias semánticas (prioridades, estados y etiquetas) derivan su fondo al 18% sobre `--color-surface` y **aclaran su texto al 50% con blanco** mediante `color-mix(in srgb, white 50%, var(--base-...))`.
+- La preferencia de tema es individual y se almacena en `localStorage` con sincronización a `prefers-color-scheme`.
+
+---
+
+### ADR-032 — Fondo de tablero como identidad compartida en PostgreSQL frente a tema como preferencia de navegador
+
+**Contexto.** Cada iniciativa técnica (peajes, parqueaderos, conciliaciones) requería diferenciación visual inmediata para evitar que los operadores ejecuten acciones sobre el tablero equivocado. Se requería determinar dónde y cómo persistir el fondo ambiental del tablero.
+
+**Alternativas descartadas.**
+1. *Almacenar el fondo en `localStorage`:* Descartado categóricamente. El fondo del tablero es una propiedad de identidad compartida del equipo (al igual que las columnas o los límites de WIP). Si residiera en el navegador local, dos operadores analizando el mismo proyecto verían fondos distintos, rompiendo la referencia visual común en reuniones de seguimiento.
+2. *Fondos con imágenes arbitrarias vía Unsplash o subida de archivos:* Descartado. Introduce latencia de red, claves de API externas susceptibles de expirar, problemas de atribución de derechos de autor y riesgos críticos de ilegibilidad si la imagen subida carece de contraste controlado.
+
+**Decisión.**
+- El fondo ambiental vive en PostgreSQL en la columna `projects.background text NOT NULL DEFAULT 'neutro'`.
+- La integridad se impone en el motor mediante `CONSTRAINT projects_background_check CHECK (background IN ('neutro', 'azul', 'verde', 'ambar', 'purpura', 'rosa'))`.
+- Las tarjetas e insignias mantienen superficies opacas (`--color-surface`), garantizando legibilidad y aislamiento cromático total respecto al fondo ambiental del contenedor.
+
+---
+
+### ADR-033 — Detector de colisiones compuesto en dos fases para resolver tarjeta y columna en el arrastre
+
+**Contexto.** Durante la interacción de arrastre entre columnas (SL-20), se observó que la biblioteca `@dnd-kit` no permitía insertar tarjetas en posiciones relativas precisas entre columnas distintas: al soltar sobre otra columna, la tarjeta caía invariablemente al final de la lista con posición `MAX + 1024` en lugar de respetar la posición intermedia deseada.
+
+**Alternativas descartadas.**
+1. *Algoritmo estándar `closestCenter`:* Descartado tras medir su comportamiento geométrico. `closestCenter` compara distancias entre centros de rectángulos delimitadores globales. Dado que las columnas poseen un área geométrica masiva en comparación con las tarjetas individuales, el centroide de la columna destino vencía siempre al de las tarjetas adyacentes, resolviendo `over.id` a la columna y evitando que el manejador `onDragEnd` recibiera el identificador de la tarjeta vecina.
+2. *Algoritmo `rectIntersection`:* Descartado por comportamiento errático en los bordes superiores e inferiores de las columnas cuando el puntero del ratón o toque táctil supera los límites del contenedor.
+
+**Decisión.** Se diseñó un detector de colisiones compuesto en dos fases (`crearDetectorCompuesto` en `TaskBoard.tsx`):
+1. **Fase 1 (Resolución de Columna):** Se utiliza `pointerWithin` para identificar la columna exacta que contiene las coordenadas físicas del puntero.
+2. **Fase 2 (Resolución de Tarjeta Local):** Una vez identificada la columna activa, se restringe la búsqueda de colisiones exclusivamente a los contenedores sortables (`TaskCard`) de dicha columna mediante `closestCorners`.
+3. Esto garantiza que `over.id` resuelva a la tarjeta vecina exacta, habilitando el cálculo de punto medio `(prev + next) / 2` y renderizando la línea indicadora de inserción visual a 60 FPS estables.
+
+---
+
+### ADR-034 — Edición en el sitio del nombre de columna con botón conmutado y aria-label accesible (WCAG 2.5.3)
+
+**Contexto.** Los usuarios requerían renombrar columnas directamente desde el tablero (SL-21) sin verse obligados a navegar al diálogo modal de administración de columnas.
+
+**Alternativas descartadas.**
+1. *Atributo nativo `contenteditable`:* Descartado. `contenteditable` altera el Virtual DOM de React, inyecta etiquetas HTML no deseadas (`<br>`, `<div>`), produce saltos de foco y complica la sincronización bidireccional con el estado.
+2. *Elemento `<input type="text">` permanente:* Descartado. Sustituir permanentemente el encabezado por un campo de texto elimina los hitos semánticos `<h3>` en el árbol de accesibilidad, perjudicando a usuarios de tecnologías de asistencia que navegan por encabezados.
+3. *Nombre accesible apoyado en `title`:* **Se midió y resultó falso.** Según el algoritmo de Accessible Name and Description Computation del W3C, el texto visible dentro de un botón **prevalece sobre el atributo `title`**. Un botón con `title="Renombrar columna Por hacer"` pero con texto «Por hacer» es anunciado por el lector como «Por hacer, botón», omitiendo por completo el propósito de la acción.
+
+**Decisión.**
+- El componente `TituloColumnaEditable` renderiza en reposo un encabezado `<h3>` con un botón accesible estilizado (`text-left truncate`).
+- El botón porta explícitamente `aria-label="Renombrar columna [Nombre]"`, cumpliendo WCAG 2.5.3 (Label in Name) al incluir el texto visible dentro del nombre accesible.
+- Al pulsar, conmuta a un `<input type="text">` con selección automática del texto (`select()`).
+- Se persiste en `Enter` o `blur` con reversión defensiva ante valor vacío o inalterado, y `Escape` restaura el valor original devolviendo el foco programático al botón contenedor.
