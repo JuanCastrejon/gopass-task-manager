@@ -45,6 +45,92 @@ describe('POST /api/projects', () => {
     expect(res.body.description).toBeNull();
   });
 
+  /**
+   * La plantilla de límites (SL-22).
+   *
+   * Se comprueba leyendo las columnas por la API y no consultando la tabla: lo
+   * que importa es que el límite quede donde el cliente va a encontrarlo y a
+   * poder cambiarlo, no solo que exista una fila con el número.
+   */
+  describe('plantilla de límite de trabajo en curso', () => {
+    async function columnasDe(id: string) {
+      const res = await request(app).get(`/api/projects/${id}/columns`);
+      expect(res.status).toBe(200);
+      return res.body as { name: string; category: string; wipLimit: number | null }[];
+    }
+
+    it('sin plantilla, el proyecto nace sin ningún límite', async () => {
+      const creado = await request(app).post('/api/projects').send({ name: 'Sin límites' });
+      expect(creado.status).toBe(201);
+
+      const columnas = await columnasDe(creado.body.id);
+      expect(columnas).toHaveLength(3);
+      expect(columnas.every((c) => c.wipLimit === null)).toBe(true);
+    });
+
+    it('omitir el campo equivale a no pedir plantilla', async () => {
+      const creado = await request(app).post('/api/projects').send({ name: 'Por defecto' });
+      const columnas = await columnasDe(creado.body.id);
+      expect(columnas.every((c) => c.wipLimit === null)).toBe(true);
+    });
+
+    it('«flujo controlado» deja el límite puesto en la columna de trabajo en curso', async () => {
+      const creado = await request(app)
+        .post('/api/projects')
+        .send({ name: 'Flujo controlado', wipTemplate: 'flujo_controlado' });
+      expect(creado.status).toBe(201);
+
+      const columnas = await columnasDe(creado.body.id);
+      const enCurso = columnas.filter((c) => c.category === 'IN_PROGRESS');
+      expect(enCurso.length).toBeGreaterThan(0);
+      expect(enCurso.every((c) => c.wipLimit === 2)).toBe(true);
+    });
+
+    it('la plantilla no toca las columnas que no son de trabajo en curso', async () => {
+      const creado = await request(app)
+        .post('/api/projects')
+        .send({ name: 'Solo en curso', wipTemplate: 'flujo_controlado' });
+
+      const columnas = await columnasDe(creado.body.id);
+      // Una columna terminal no admite límite: lo impide el CHECK
+      // `project_columns_done_has_no_wip`. Si la plantilla lo intentara, la
+      // creación entera fallaría, no se guardaría a medias.
+      for (const c of columnas.filter((x) => x.category !== 'IN_PROGRESS')) {
+        expect(c.wipLimit).toBeNull();
+      }
+    });
+
+    it('el límite que pone la plantilla se puede quitar después', async () => {
+      // Es lo que la convierte en un valor por defecto de producto y no en una
+      // invariante: quien la recibe no queda atado a ella.
+      const creado = await request(app)
+        .post('/api/projects')
+        .send({ name: 'Revocable', wipTemplate: 'flujo_controlado' });
+
+      const columnas = (await request(app).get(`/api/projects/${creado.body.id}/columns`))
+        .body as { id: string; category: string; wipLimit: number | null }[];
+      const enCurso = columnas.find((c) => c.category === 'IN_PROGRESS');
+      expect(enCurso?.wipLimit).toBe(2);
+
+      const quitado = await request(app)
+        .patch(`/api/projects/${creado.body.id}/columns/${enCurso!.id}`)
+        .send({ wipLimit: null });
+
+      expect(quitado.status).toBe(200);
+      expect(quitado.body.wipLimit).toBeNull();
+    });
+
+    it('rechaza una plantilla desconocida con 400 y señala el campo', async () => {
+      const res = await request(app)
+        .post('/api/projects')
+        .send({ name: 'Plantilla rara', wipTemplate: 'agresiva' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+      expect(res.body.errors?.[0]?.path).toBe('wipTemplate');
+    });
+  });
+
   it('rechaza un nombre en blanco con 400 y señala el campo', async () => {
     const res = await request(app).post('/api/projects').send({ name: '   ' });
 

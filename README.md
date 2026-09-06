@@ -2,11 +2,31 @@
 
 Gestión de tareas por proyectos. **React 18 · Node/Express · PostgreSQL 16.**
 
+## Requisitos
+
+**Para levantar el proyecto solo hace falta Docker.** Node, npm y PostgreSQL viven dentro de los contenedores; no hay que instalarlos en el equipo ni hacer coincidir versiones con las del anfitrión.
+
+| | Versión | Por qué esa |
+|---|---|---|
+| **Docker Engine** | 20.10 o superior | Necesario para `healthcheck` y la sintaxis de `depends_on: condition` que usa `docker-compose.yml` |
+| **Docker Compose** | v2 (el comando `docker compose`, sin guion) | El archivo no declara `version:`, que v1 exige |
+
+Comprobado con Docker 29.7.2 y Compose 5.5.0. Si `docker compose version` responde, está todo.
+
 ```bash
 docker compose up --build
 ```
 
-Un solo requisito: Docker. Levanta la base, aplica migraciones y siembra datos de ejemplo.
+Levanta PostgreSQL, aplica las once migraciones, siembra los datos de ejemplo y publica la aplicación. La primera vez tarda un par de minutos construyendo las imágenes; las siguientes, segundos.
+
+**Solo si vas a trabajar fuera de los contenedores** hacen falta además:
+
+| | Versión | Por qué esa |
+|---|---|---|
+| **Node.js** | 22 recomendada, 20 el mínimo | `package.json` declara `"engines": { "node": ">=20" }`; las imágenes y la integración continua usan 22, así que es la única versión con la que se comprueba de verdad |
+| **npm** | 10 o superior | La que acompaña a Node 20 y 22 |
+
+Ese camino está descrito más abajo, en **Desarrollo fuera de contenedores**. No hace falta para evaluar el proyecto.
 
 | | |
 |---|---|
@@ -44,7 +64,7 @@ Crear proyectos, asociarles tareas con estado y prioridad, y ver el trabajo de f
 | **Panel** | Totales, avance global y reparto de tareas por estado, agregados en la base de un solo viaje |
 | **Proyectos** | Alta, edición y borrado, con barra de avance calculada en SQL |
 | **Tablero** | Columnas **configurables por proyecto**: crear, renombrar desde su propia cabecera, reordenar y borrar reasignando lo que contienen |
-| **Límite de trabajo en curso** | Opcional y por columna, no por proyecto: «Desarrollo máximo 3» y «QA máximo 2» son políticas distintas y coexisten |
+| **Límite de trabajo en curso** | Opcional y por columna, no por proyecto: «Desarrollo máximo 3» y «QA máximo 2» son políticas distintas y coexisten. Se elige al crear el proyecto con una plantilla, y se ajusta después columna a columna desde «Editar» |
 | **Orden de las tarjetas** | Por columna, entre cinco criterios o manual arrastrando, con posición fraccionaria para no reescribir la columna entera |
 | **Tarjetas** | Fecha de vencimiento con semáforo temporal, etiquetas de color y completado en un clic |
 | **Filtros** | Viven en la URL: un tablero filtrado se comparte por enlace y sobrevive a una recarga |
@@ -54,7 +74,7 @@ Crear proyectos, asociarles tareas con estado y prioridad, y ver el trabajo de f
 
 ## Vídeo de demostración
 
-**[docs/assets/demo.mp4](docs/assets/demo.mp4)** — 2 min 52 s, con locución. Añadir una columna y renombrarla desde su cabecera, ponerle un límite de trabajo en curso y agotarlo hasta que el tablero rechaza la tercera tarjeta, el contrato publicado en Swagger, y el conflicto que devuelve la base al intentar borrar un proyecto que todavía tiene tareas.
+**[docs/assets/demo.mp4](docs/assets/demo.mp4)** — 2 min 48 s, con locución. Añadir una columna y renombrarla desde su cabecera, poner el límite de trabajo en curso desde «Editar proyecto» y agotarlo hasta que el tablero rechaza la tercera tarjeta, el contrato publicado en Swagger, y el conflicto que devuelve la base al intentar borrar un proyecto que todavía tiene tareas.
 
 Está dentro del repositorio a propósito: la entrega no depende de ningún servicio externo que pueda caducar o cambiar de permisos. GitHub no reproduce en línea un MP4 enlazado desde el README, así que el enlace lo abre o lo descarga.
 
@@ -75,7 +95,7 @@ Un `CHECK` verifica la invariante `DONE ⟺ completed_at IS NOT NULL` y un trigg
 **5. Sin ORM y sin librería de enrutado.**
 Dos entidades no justifican una abstracción que oculta el control granular del SQL y los planes de ejecución; el patrón repositorio da el mismo aislamiento. Para el enrutado se midió el coste real de `react-router-dom` en este bundle —**+13.4 KB gzip para dos rutas**— y se resolvió con la History API.
 
-El registro completo son **35 ADRs** en [docs/spec/04-arquitectura.md](docs/spec/04-arquitectura.md), cada uno con su contexto, sus alternativas descartadas y por qué.
+El registro completo son **36 ADRs** en [docs/spec/04-arquitectura.md](docs/spec/04-arquitectura.md), cada uno con su contexto, sus alternativas descartadas y por qué.
 
 ## Arquitectura
 
@@ -122,8 +142,8 @@ Veintitrés endpoints. Errores en `application/problem+json` (RFC 7807) con un `
 ## Calidad
 
 ```
-258 pruebas    149 backend (integración contra PostgreSQL real) · 85 frontend · 24 E2E
-96.67 %       cobertura de líneas del backend funcional
+274 pruebas    155 backend (integración contra PostgreSQL real) · 93 frontend · 26 E2E
+96.61 %       cobertura de líneas del backend funcional
 ```
 
 Las pruebas de integración corren contra PostgreSQL de verdad, no contra un doble del driver: cada worker crea su propia base (`gopass_tasks_test_<id>`), aplica las migraciones y trunca entre casos, así que los archivos siguen ejecutándose en paralelo. Simular el driver probaría el simulador.
@@ -174,7 +194,7 @@ Límites conocidos del diseño actual: en edición concurrente gana la última e
 | [Requisitos y trazabilidad](docs/spec/01-requisitos.md) | RF y RNF con criterios de aceptación; qué queda fuera y por qué |
 | [Modelo de dominio](docs/spec/02-modelo-dominio.md) | DDL completo, invariantes y decisiones de modelado |
 | [Contrato de API](docs/spec/03-contrato-api.md) | Endpoints, errores RFC 7807, mapeo `SQLSTATE`→HTTP |
-| [Arquitectura](docs/spec/04-arquitectura.md) | Capas, estructura y los 35 ADRs |
+| [Arquitectura](docs/spec/04-arquitectura.md) | Capas, estructura y los 36 ADRs |
 | [Estrategia de calidad](docs/spec/05-estrategia-calidad.md) | Pruebas, CI, quality gates y matriz de trazabilidad |
 | [Verificación de PostgreSQL](docs/spec/08-verificacion-postgres.md) | Mediciones contra el motor que decidieron el modelo de datos |
 | [Desarrollo asistido por IA](docs/process/ai-assisted-development.md) | Cómo se trabajó y qué se verificó |

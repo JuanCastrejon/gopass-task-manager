@@ -1,7 +1,12 @@
 import { pool } from '../../db/pool.js';
 import { isTaskProjectFkViolation, translatePgError } from '../../db/pg-error.js';
-import { ProjectHasTasksError, ProjectNotFoundError } from '../../http/errors.js';
+import {
+  ProjectHasTasksError,
+  ProjectNotFoundError,
+  WipTemplateNoTargetError,
+} from '../../http/errors.js';
 import type { ProjectRow, ProjectSummaryRow } from './projects.mapper.js';
+import { LIMITE_FLUJO_CONTROLADO } from './projects.schema.js';
 import type { CreateProjectInput, PatchProjectInput } from './projects.schema.js';
 
 const PROJECT_FIELDS = 'id, name, description, background, created_at, updated_at';
@@ -71,9 +76,38 @@ export async function findProjectById(id: string): Promise<ProjectSummaryRow> {
   return row;
 }
 
+/**
+ * Crear un proyecto y, si se pidió plantilla, dejar sus límites puestos, en una
+ * sola transacción.
+ *
+ * **Por qué la plantilla la aplica el repositorio y no el trigger.** El trigger
+ * es `AFTER INSERT ... FOR EACH ROW`: solo ve la fila de `projects`. Para
+ * conocer la plantilla haría falta un dato en esa fila —una columna
+ * `wip_template`— que solo tendría sentido durante el `INSERT` y quedaría
+ * muerta después. Es exactamente el defecto que la migración `0003` corrigió al
+ * eliminar `projects.wip_limit`: «dos sitios donde declarar la misma cosa». La
+ * alternativa, una variable de sesión, acopla el trigger al pool y es invisible
+ * para el seed y para `psql`, que es lo que justifica que el trigger exista.
+ *
+ * La regla «todo proyecto nace con su tablero» sigue siendo del motor. Lo que
+ * se añade aquí es una preferencia inicial, revocable desde la edición.
+ *
+ * **A todas las columnas de trabajo en curso, no solo a la primera.** Hoy el
+ * trigger crea exactamente una, así que ambos criterios coinciden; se elige
+ * este porque es el que sostiene ADR-023, que puso el límite por columna
+ * precisamente para que «Desarrollo máximo 3» y «QA máximo 2» convivan. Con
+ * «solo la primera», una segunda columna `IN_PROGRESS` nacería sin límite y el
+ * trabajo se escaparía por ella.
+ *
+ * Las columnas terminales no se tocan: el `CHECK project_columns_done_has_no_wip`
+ * rechazaría el `UPDATE`, y el filtro por categoría lo evita antes de llegar.
+ */
 export async function createProject(input: CreateProjectInput): Promise<ProjectRow> {
+  const cliente = await pool.connect();
   try {
-    const result = await pool.query<ProjectRow>(
+    await cliente.query('BEGIN');
+
+    const result = await cliente.query<ProjectRow>(
       `INSERT INTO projects (name, description, background)
        VALUES ($1, $2, $3)
        RETURNING ${PROJECT_FIELDS}`,
@@ -87,9 +121,36 @@ export async function createProject(input: CreateProjectInput): Promise<ProjectR
     // mismo motivo por el que `completed_at` lo sella el motor y no la
     // aplicación. Un proyecto sin columnas no sería un tablero vacío sino uno
     // roto, donde no se puede crear ni una tarea.
-    return result.rows[0]!;
+    const proyecto = result.rows[0]!;
+
+    if (input.wipTemplate === 'flujo_controlado') {
+      // El trigger ya terminó: es `AFTER INSERT` y se completa dentro de la
+      // sentencia que lo dispara, así que sus columnas son visibles aquí.
+      const aplicado = await cliente.query(
+        `UPDATE project_columns
+            SET wip_limit = $2
+          WHERE project_id = $1 AND category = 'IN_PROGRESS'`,
+        [proyecto.id, LIMITE_FLUJO_CONTROLADO],
+      );
+
+      // Cero filas significa que el tablero por defecto dejó de tener una
+      // columna de trabajo en curso. El proyecto nacería mintiendo sobre su
+      // configuración, así que no nace.
+      if (aplicado.rowCount === 0) throw new WipTemplateNoTargetError();
+    }
+
+    await cliente.query('COMMIT');
+    return proyecto;
   } catch (err) {
+    await cliente.query('ROLLBACK').catch(() => {
+      // Un ROLLBACK que falla no debe tapar el error que lo provocó.
+    });
+    if (err instanceof WipTemplateNoTargetError) throw err;
     throw translatePgError(err) ?? err;
+  } finally {
+    // Sin esto el pool se queda sin clientes tras unas pocas creaciones y el
+    // servidor deja de responder, con la conexión filtrada en silencio.
+    cliente.release();
   }
 }
 

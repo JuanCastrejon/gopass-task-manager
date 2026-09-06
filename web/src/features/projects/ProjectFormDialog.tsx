@@ -3,12 +3,14 @@ import { Modal } from '../../components/ui/Modal.tsx';
 import { Button } from '../../components/ui/Button.tsx';
 import { fieldErrors, messageFor } from '../../lib/error-messages.ts';
 import { useCreateProject, useUpdateProject } from './api.ts';
+import { useColumns, useUpdateColumn } from '../columns/api.ts';
 import {
   BOARD_BACKGROUND_CLASSES,
   PROJECT_BACKGROUND_NAMES,
   PROJECT_BACKGROUNDS,
   type ProjectBackground,
   type ProjectSummary,
+  type WipTemplate,
 } from '../../types/api.ts';
 
 interface Props {
@@ -20,15 +22,49 @@ interface Props {
 
 const MAX_NAME = 120;
 
+/**
+ * Los límites tienen dos formas según el momento, porque la pregunta que se
+ * puede responder es distinta.
+ *
+ * **Al crear** las columnas todavía no existen: las pone un trigger justo
+ * después del INSERT. Pedir «cuánto en Desarrollo» sería pedirlo para una
+ * columna sin nombre, así que se ofrece una intención y el servidor la traduce.
+ *
+ * **Al editar** las columnas ya están, con sus nombres y sus tareas dentro, así
+ * que se muestran una a una y se editan por separado. Es donde se buscan.
+ *
+ * Las dos escriben el mismo campo, `project_columns.wip_limit`, así que no
+ * pueden divergir.
+ */
+const PLANTILLAS: { valor: WipTemplate; titulo: string; detalle: string }[] = [
+  {
+    valor: 'sin_limites',
+    titulo: 'Sin límites',
+    detalle: 'Cualquier columna admite todas las tareas que hagan falta.',
+  },
+  {
+    valor: 'flujo_controlado',
+    titulo: 'Flujo controlado',
+    detalle: 'Máximo 2 tareas a la vez en curso. Se puede cambiar o quitar luego.',
+  },
+];
+
 export function ProjectFormDialog({ open, onClose, project }: Props) {
   const editing = project !== undefined;
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [background, setBackground] = useState<ProjectBackground>(project?.background ?? 'neutro');
+  const [plantilla, setPlantilla] = useState<WipTemplate>('sin_limites');
 
   const create = useCreateProject();
   const update = useUpdateProject(project?.id ?? '');
   const mutation = editing ? update : create;
+
+  // Las columnas solo se piden en edición: al crear todavía no existen. La
+  // consulta queda deshabilitada mientras el diálogo está cerrado para no
+  // lanzar una petición por cada tarjeta del panel.
+  const columnas = useColumns(project?.id ?? '', open && editing);
+  const actualizarColumna = useUpdateColumn(project?.id ?? '');
 
   // Al abrir se recargan los valores y se limpia el error del intento
   // anterior: reabrir un diálogo no debe mostrar el fallo de la vez pasada.
@@ -37,6 +73,7 @@ export function ProjectFormDialog({ open, onClose, project }: Props) {
     setName(project?.name ?? '');
     setDescription(project?.description ?? '');
     setBackground(project?.background ?? 'neutro');
+    setPlantilla('sin_limites');
     mutation.reset();
     // `mutation` cambia de identidad en cada render; depender de él aquí
     // reiniciaría el formulario mientras se escribe.
@@ -67,7 +104,12 @@ export function ProjectFormDialog({ open, onClose, project }: Props) {
       );
     } else {
       create.mutate(
-        { name: name.trim(), ...(limpio === '' ? {} : { description: limpio }), background },
+        {
+          name: name.trim(),
+          ...(limpio === '' ? {} : { description: limpio }),
+          background,
+          wipTemplate: plantilla,
+        },
         { onSuccess: onClose },
       );
     }
@@ -152,6 +194,80 @@ export function ProjectFormDialog({ open, onClose, project }: Props) {
             })}
           </div>
         </div>
+
+        {/* Los límites de trabajo en curso, en la superficie que corresponde al
+            momento. Ver la nota de PLANTILLAS. */}
+        {!editing && (
+          <div>
+            <label id="project-wip-label" className="mb-1.5 block text-sm font-medium">
+              Límite de trabajo en curso
+            </label>
+            <div role="radiogroup" aria-labelledby="project-wip-label" className="grid gap-2">
+              {PLANTILLAS.map((p) => {
+                const seleccionada = plantilla === p.valor;
+                return (
+                  <button
+                    key={p.valor}
+                    type="button"
+                    role="radio"
+                    aria-checked={seleccionada}
+                    onClick={() => setPlantilla(p.valor)}
+                    className={`rounded-lg border p-2.5 text-left transition ${
+                      seleccionada
+                        ? 'border-brand ring-2 ring-brand ring-offset-1'
+                        : 'border-border bg-surface hover:border-ink-muted/30'
+                    }`}
+                  >
+                    <span className="block text-sm font-medium">{p.titulo}</span>
+                    <span className="mt-0.5 block text-xs text-ink-muted">{p.detalle}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {editing && (
+          <div>
+            <span className="mb-1.5 block text-sm font-medium">Límites por columna</span>
+            {columnas.isPending && <p className="text-xs text-ink-muted">Cargando columnas…</p>}
+            {columnas.data && (
+              <ul className="divide-y divide-border rounded-lg border border-border">
+                {columnas.data.map((col) => (
+                  <li key={col.id} className="flex items-center gap-3 px-3 py-2">
+                    <span className="min-w-0 flex-1 truncate text-sm">{col.name}</span>
+                    {col.category === 'DONE' ? (
+                      // Limitar lo ya terminado no significa nada, y el CHECK
+                      // `project_columns_done_has_no_wip` lo impide en la base.
+                      <span className="text-xs text-ink-muted">sin límite</span>
+                    ) : (
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        defaultValue={col.wipLimit ?? ''}
+                        placeholder="—"
+                        aria-label={`Límite de trabajo en curso de ${col.name}`}
+                        title="Máximo de tareas simultáneas. Vacío es sin límite."
+                        onBlur={(e) => {
+                          const valor = e.target.value.trim() === '' ? null : Number(e.target.value);
+                          if (valor !== col.wipLimit) {
+                            actualizarColumna.mutate({ id: col.id, patch: { wipLimit: valor } });
+                          }
+                        }}
+                        className="w-14 shrink-0 rounded border border-border bg-surface px-1.5 py-1
+                                   text-center text-xs outline-none focus:border-brand"
+                      />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-1 text-xs text-ink-muted">
+              Vacío es sin límite. Se guarda al salir del campo.
+            </p>
+          </div>
+        )}
 
         {/* Errores que no son de un campo concreto: el 409 de nombre repetido
             es el caso típico. */}
