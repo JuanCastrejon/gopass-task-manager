@@ -39,11 +39,11 @@ async function conTransaccion<T>(trabajo: (cliente: PoolClient) => Promise<T>): 
 
 const TASK_FIELDS = `
   id, project_id, column_id, title, description, status, priority, position,
-  completed_at, created_at, updated_at`;
+  due_date, completed_at, created_at, updated_at`;
 
 const TASK_FIELDS_T = `
   t.id, t.project_id, t.column_id, t.title, t.description, t.status, t.priority, t.position,
-  t.completed_at, t.created_at, t.updated_at`;
+  t.due_date, t.completed_at, t.created_at, t.updated_at`;
 
 /**
  * Columnas escribibles. El nombre de columna sale siempre de este mapa, nunca
@@ -61,6 +61,7 @@ const WRITABLE = {
   columnId: 'column_id',
   priority: 'priority',
   projectId: 'project_id',
+  dueDate: 'due_date',
 } as const;
 
 type WritableKey = keyof typeof WRITABLE;
@@ -112,6 +113,7 @@ const LIST_QUERY = `
     CASE pc.sort WHEN 'priority_desc' THEN t.priority   END DESC,
     CASE pc.sort WHEN 'created_asc'   THEN t.created_at END ASC,
     CASE pc.sort WHEN 'created_desc'  THEN t.created_at END DESC,
+    CASE pc.sort WHEN 'due_asc'       THEN t.due_date   END ASC NULLS LAST,
     t.created_at DESC, t.id`;
 
 export async function listTasksByProject(

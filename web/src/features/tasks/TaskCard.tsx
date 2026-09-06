@@ -3,7 +3,7 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { ArrowLeft, ArrowRight, Check, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/Button.tsx';
-import { PriorityBadge } from '../../components/ui/Badge.tsx';
+import { DueDateBadge, PriorityBadge } from '../../components/ui/Badge.tsx';
 import type { ProjectColumnSummary, Task } from '../../types/api.ts';
 
 /**
@@ -326,7 +326,10 @@ export function TaskCard({
           <span className="size-7 pointer-coarse:size-11" />
         )}
 
-        <PriorityBadge priority={task.priority} />
+        <div className="flex items-center gap-1.5 flex-wrap justify-center min-w-0">
+          <PriorityBadge priority={task.priority} />
+          <DueDateBadge dueDate={task.dueDate} isDone={esCompletada} />
+        </div>
 
         {siguiente ? (
           <Button

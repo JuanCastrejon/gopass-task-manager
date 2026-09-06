@@ -41,19 +41,33 @@ const PROJECTS = [
   },
 ] as const;
 
-const TASKS = [
-  ['7c2e1b20-0000-4000-8000-000000000001', 0, 'Definir contrato de conciliación con el operador', 'IN_PROGRESS', 'HIGH'],
-  ['7c2e1b20-0000-4000-8000-000000000002', 0, 'Homologar lectores TAG del corredor norte', 'TODO', 'HIGH'],
-  ['7c2e1b20-0000-4000-8000-000000000003', 0, 'Documentar el protocolo de contingencia sin red', 'TODO', 'MEDIUM'],
-  ['7c2e1b20-0000-4000-8000-000000000004', 0, 'Levantar el entorno de pruebas del operador', 'DONE', 'LOW'],
-  ['7c2e1b20-0000-4000-8000-000000000005', 1, 'Diseñar la pantalla de liquidación de tarifa', 'IN_PROGRESS', 'MEDIUM'],
-  ['7c2e1b20-0000-4000-8000-000000000006', 1, 'Integrar la pasarela de pagos en ambiente de pruebas', 'TODO', 'HIGH'],
-  ['7c2e1b20-0000-4000-8000-000000000007', 1, 'Definir el manejo de salidas sin pago', 'TODO', 'MEDIUM'],
-  ['7c2e1b20-0000-4000-8000-000000000008', 1, 'Aprobar el flujo con el equipo de operaciones', 'DONE', 'LOW'],
-  ['7c2e1b20-0000-4000-8000-000000000009', 2, 'Automatizar la carga del extracto bancario', 'TODO', 'HIGH'],
-  ['7c2e1b20-0000-4000-8000-00000000000a', 2, 'Definir la regla de tolerancia por diferencia de centavos', 'DONE', 'MEDIUM'],
-  ['7c2e1b20-0000-4000-8000-00000000000b', 2, 'Reporte diario de partidas no conciliadas', 'DONE', 'LOW'],
-] as const;
+const TASKS: readonly [
+  id: string,
+  projectIndex: number,
+  title: string,
+  status: 'TODO' | 'IN_PROGRESS' | 'DONE',
+  priority: 'LOW' | 'MEDIUM' | 'HIGH',
+  dueDaysOffset: number | null,
+][] = [
+  // Proyecto 0: Telepeaje
+  // Vence pronto (dentro de los próximos 3 días naturales: mañana)
+  ['7c2e1b20-0000-4000-8000-000000000001', 0, 'Definir contrato de conciliación con el operador', 'IN_PROGRESS', 'HIGH', 1],
+  // Vencida (hace 2 días)
+  ['7c2e1b20-0000-4000-8000-000000000002', 0, 'Homologar lectores TAG del corredor norte', 'TODO', 'HIGH', -2],
+  // Con tiempo (en 10 días)
+  ['7c2e1b20-0000-4000-8000-000000000003', 0, 'Documentar el protocolo de contingencia sin red', 'TODO', 'MEDIUM', 10],
+  // Sin fecha
+  ['7c2e1b20-0000-4000-8000-000000000004', 0, 'Levantar el entorno de pruebas del operador', 'DONE', 'LOW', null],
+  // Proyecto 1: App de parqueaderos
+  ['7c2e1b20-0000-4000-8000-000000000005', 1, 'Diseñar la pantalla de liquidación de tarifa', 'IN_PROGRESS', 'MEDIUM', 2],
+  ['7c2e1b20-0000-4000-8000-000000000006', 1, 'Integrar la pasarela de pagos en ambiente de pruebas', 'TODO', 'HIGH', null],
+  ['7c2e1b20-0000-4000-8000-000000000007', 1, 'Definir el manejo de salidas sin pago', 'TODO', 'MEDIUM', null],
+  ['7c2e1b20-0000-4000-8000-000000000008', 1, 'Aprobar el flujo con el equipo de operaciones', 'DONE', 'LOW', null],
+  // Proyecto 2: Conciliación de transacciones
+  ['7c2e1b20-0000-4000-8000-000000000009', 2, 'Automatizar la carga del extracto bancario', 'TODO', 'HIGH', null],
+  ['7c2e1b20-0000-4000-8000-00000000000a', 2, 'Definir la regla de tolerancia por diferencia de centavos', 'DONE', 'MEDIUM', null],
+  ['7c2e1b20-0000-4000-8000-00000000000b', 2, 'Reporte diario de partidas no conciliadas', 'DONE', 'LOW', null],
+];
 
 export async function runSeed(): Promise<{ projects: number; tasks: number }> {
   const client = await pool.connect();
@@ -72,14 +86,20 @@ export async function runSeed(): Promise<{ projects: number; tasks: number }> {
     }
 
     let tasks = 0;
-    for (const [id, projectIndex, title, status, priority] of TASKS) {
+    for (const [id, projectIndex, title, status, priority, dueDaysOffset] of TASKS) {
       const project = PROJECTS[projectIndex];
       if (!project) continue;
       const res = await client.query(
-        `INSERT INTO tasks (id, project_id, title, status, priority)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO tasks (id, project_id, title, status, priority, due_date)
+         VALUES (
+           $1, $2, $3, $4, $5,
+           CASE
+             WHEN $6::int IS NOT NULL THEN (CURRENT_DATE + ($6 * INTERVAL '1 day'))::date
+             ELSE NULL
+           END
+         )
          ON CONFLICT (id) DO NOTHING`,
-        [id, project.id, title, status, priority],
+        [id, project.id, title, status, priority, dueDaysOffset],
       );
       tasks += res.rowCount ?? 0;
     }

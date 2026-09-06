@@ -1,4 +1,5 @@
 import type { TaskPriority, TaskStatus } from '../../types/api.ts';
+import { calcularEstadoVencimiento } from '../../features/tasks/due-date.ts';
 
 export const STATUS_LABEL: Record<TaskStatus, string> = {
   TODO: 'Por hacer',
@@ -68,5 +69,34 @@ export function StatusDot({ status }: { status: TaskStatus }) {
       aria-hidden
       className={`inline-block size-2 shrink-0 rounded-full ${STATUS_DOT[status]}`}
     />
+  );
+}
+
+/**
+ * Insignia de fecha de vencimiento (SL-17).
+ *
+ * Siempre visible cuando la tarea tenga fecha, no solo cuando urge.
+ * La completada gana siempre, atenuando la insignia y dejando de alarmar.
+ * Nunca solo color: incluye texto con el estado y etiqueta accesible completa.
+ */
+export function DueDateBadge({
+  dueDate,
+  isDone,
+}: {
+  dueDate: string | null | undefined;
+  isDone: boolean;
+}) {
+  if (!dueDate) return null;
+  const info = calcularEstadoVencimiento(dueDate, isDone);
+  if (info.status === 'sin_fecha') return null;
+
+  return (
+    <span
+      data-testid="due-date-badge"
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors ${info.className}`}
+      aria-label={info.ariaLabel}
+    >
+      {info.label}
+    </span>
   );
 }

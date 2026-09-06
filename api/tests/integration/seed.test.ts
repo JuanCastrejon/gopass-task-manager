@@ -85,4 +85,37 @@ describe('seed de datos de demostración (RF-16)', () => {
     expect(automaticas.length).toBeGreaterThan(0);
     expect(manuales.length).toBeGreaterThan(0);
   });
+
+  it('la demo incluye tareas con los tres estados de vencimiento y tareas sin fecha', async () => {
+    await runSeed();
+
+    const { rows } = await pool.query<{ due_date: string | null }>(
+      'SELECT due_date FROM tasks',
+    );
+
+    // Calcular días respecto a la fecha actual para clasificar estados
+    const hoy = new Date().toISOString().slice(0, 10);
+    let vencidas = 0;
+    let vencenPronto = 0;
+    let conTiempo = 0;
+    let sinFecha = 0;
+
+    for (const t of rows) {
+      if (!t.due_date) {
+        sinFecha++;
+        continue;
+      }
+      const diffDias = Math.round(
+        (new Date(t.due_date).getTime() - new Date(hoy).getTime()) / (1000 * 60 * 60 * 24),
+      );
+      if (diffDias < 0) vencidas++;
+      else if (diffDias <= 3) vencenPronto++;
+      else conTiempo++;
+    }
+
+    expect(vencidas).toBeGreaterThan(0);
+    expect(vencenPronto).toBeGreaterThan(0);
+    expect(conTiempo).toBeGreaterThan(0);
+    expect(sinFecha).toBeGreaterThan(0);
+  });
 });
