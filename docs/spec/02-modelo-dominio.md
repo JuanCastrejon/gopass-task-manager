@@ -24,6 +24,7 @@
 │  description   text?     │
 │  status        enum      │  TODO | IN_PROGRESS | DONE
 │  priority      enum      │  LOW | MEDIUM | HIGH
+│  position      double    │  único por columna (tasks_position_unica)
 │  completed_at  timestamptz?
 │  created_at    timestamptz
 │  updated_at    timestamptz
@@ -151,6 +152,40 @@ $$ LANGUAGE plpgsql;
 
 Si `updated_at` lo escribe la aplicación, cualquier `UPDATE` ejecutado fuera de ella lo deja mintiendo. El trigger lo hace incondicional.
 
+### Posición de ordenación manual y restricción única
+
+```sql
+ALTER TABLE tasks ADD COLUMN position double precision NOT NULL;
+ALTER TABLE tasks ADD CONSTRAINT tasks_position_unica UNIQUE (column_id, position);
+```
+
+El orden manual dentro de una columna utiliza una posición fraccionaria (`double precision`). Al mover una tarjeta entre dos existentes con posiciones $a$ y $b$, el servidor calcula el punto medio $(a + b) / 2.0$ en $O(1)$ sin renumerar las demás tarjetas.
+
+La restricción `tasks_position_unica` sobre `(column_id, position)` es fundamental:
+- **Protege contra el límite de precisión de IEEE 754**: a las 52 divisiones consecutivas en el mismo hueco, el cálculo colapsa numéricamente contra el extremo. La restricción convierte ese fallo silencioso en un error detectable `SQLSTATE 23505 (unique_violation)`.
+- **Resuelve la concurrencia**: dos inserciones simultáneas que calculen el mismo punto medio chocan contra la restricción. La aplicación captura el 23505, revierte al savepoint, rebalancea la columna con `ROW_NUMBER() * 1024.0` y reintenta.
+
+### `position` por trigger en inserción, no por aplicación
+
+```sql
+CREATE FUNCTION set_task_position() RETURNS trigger AS $$
+BEGIN
+  IF NEW.position IS NULL THEN
+    SELECT COALESCE(MAX(position), 0) + 1024.0 INTO NEW.position
+      FROM tasks
+     WHERE column_id = NEW.column_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER tasks_set_position
+  BEFORE INSERT ON tasks
+  FOR EACH ROW EXECUTE FUNCTION set_task_position();
+```
+
+Si la asignación de posición viviera solo en el servicio, cualquier inserción desde el seed o desde `psql` fallaría al violar el `NOT NULL`. El trigger asigna automáticamente `MAX(position) + 1024.0` al final de la columna cuando la fila no trae posición explícita.
+
 ### Índices
 
 ```sql
@@ -193,15 +228,17 @@ CREATE TRIGGER projects_set_updated_at
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TABLE tasks (
-  id           uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id   uuid          NOT NULL,
-  title        text          NOT NULL,
+  id           uuid             PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id   uuid             NOT NULL,
+  column_id    uuid             NOT NULL,
+  title        text             NOT NULL,
   description  text,
-  status       task_status   NOT NULL DEFAULT 'TODO',
-  priority     task_priority NOT NULL DEFAULT 'MEDIUM',
+  status       task_status      NOT NULL DEFAULT 'TODO',
+  priority     task_priority    NOT NULL DEFAULT 'MEDIUM',
+  position     double precision NOT NULL,
   completed_at timestamptz,
-  created_at   timestamptz   NOT NULL DEFAULT now(),
-  updated_at   timestamptz   NOT NULL DEFAULT now(),
+  created_at   timestamptz      NOT NULL DEFAULT now(),
+  updated_at   timestamptz      NOT NULL DEFAULT now(),
 
   CONSTRAINT tasks_project_id_fkey
     FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE RESTRICT,
@@ -211,11 +248,27 @@ CREATE TABLE tasks (
   CONSTRAINT tasks_done_completed_at CHECK (
     (status = 'DONE'  AND completed_at IS NOT NULL) OR
     (status <> 'DONE' AND completed_at IS NULL)
-  )
+  ),
+  CONSTRAINT tasks_position_unica UNIQUE (column_id, position)
 );
 
 CREATE INDEX tasks_project_id_idx     ON tasks (project_id);
 CREATE INDEX tasks_project_status_idx ON tasks (project_id, status);
+
+CREATE FUNCTION set_task_position() RETURNS trigger AS $$
+BEGIN
+  IF NEW.position IS NULL THEN
+    SELECT COALESCE(MAX(position), 0) + 1024.0 INTO NEW.position
+      FROM tasks
+     WHERE column_id = NEW.column_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER tasks_set_position
+  BEFORE INSERT ON tasks
+  FOR EACH ROW EXECUTE FUNCTION set_task_position();
 
 CREATE TRIGGER tasks_set_updated_at
   BEFORE UPDATE ON tasks

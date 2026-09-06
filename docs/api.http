@@ -1,6 +1,6 @@
 ### GoPass Task Manager — colección ejecutable de la API
 #
-# Doce endpoints. Se ejecuta desde VS Code con la extensión REST Client
+# Trece endpoints. Se ejecuta desde VS Code con la extensión REST Client
 # (`humao.rest-client`) o desde JetBrains, pulsando «Send Request» sobre cada
 # bloque. Sirve además de guion: el orden de abajo recorre el ciclo completo,
 # incluidos los caminos de error.
@@ -150,6 +150,99 @@ GET {{host}}/projects/{{projectId}}/tasks?status=BANANA
 GET {{host}}/projects/{{projectId}}/tasks?status=
 
 
+### ─────────────── reordenación manual de tareas ───────────────
+
+### Crear una segunda tarea para tener vecinas con las que ordenar
+# @name crearTareaDos
+POST {{host}}/projects/{{projectId}}/tasks
+Content-Type: application/json
+
+{
+  "title": "Instalar antenas RFID"
+}
+
+@taskId2 = {{crearTareaDos.response.body.id}}
+@columnId = {{crearTareaDos.response.body.columnId}}
+
+
+### Crear una tercera tarea en la misma columna
+# @name crearTareaTres
+POST {{host}}/projects/{{projectId}}/tasks
+Content-Type: application/json
+
+{
+  "title": "Configurar balanceadores de carga"
+}
+
+@taskId3 = {{crearTareaTres.response.body.id}}
+
+
+### Crear una cuarta tarea para moverla entre vecinas
+# @name crearTareaCuatro
+POST {{host}}/projects/{{projectId}}/tasks
+Content-Type: application/json
+
+{
+  "title": "Calibrar sensores de paso"
+}
+
+@taskId4 = {{crearTareaCuatro.response.body.id}}
+
+
+### Reordenar entre dos vecinas: el servidor calcula el punto medio
+# El cliente no envía una posición numérica sino las vecinas entre las que
+# desea ubicar la tarjeta. La posición resultante es (prev + next) / 2.
+PATCH {{host}}/tasks/{{taskId4}}/reorder
+Content-Type: application/json
+
+{
+  "columnId": "{{columnId}}",
+  "previousTaskId": "{{taskId2}}",
+  "nextTaskId": "{{taskId3}}"
+}
+
+
+### Reordenar al principio: sin anterior, la nueva posición es la mitad de la siguiente
+# Con `previousTaskId: null`, el servidor ubica la tarea al inicio calculando
+# next / 2 sin necesidad de renumerar el resto de la columna.
+PATCH {{host}}/tasks/{{taskId3}}/reorder
+Content-Type: application/json
+
+{
+  "columnId": "{{columnId}}",
+  "previousTaskId": null,
+  "nextTaskId": "{{taskId2}}"
+}
+
+
+### Reordenar al final: con ambas vecinas nulas se ubica tras la última tarea
+# Ambas vecinas nulas es una petición legítima que sitúa la tarjeta al final
+# de la columna con MAX(position) + 1024 (o 1024 si la columna estuviese vacía).
+PATCH {{host}}/tasks/{{taskId3}}/reorder
+Content-Type: application/json
+
+{
+  "columnId": "{{columnId}}",
+  "previousTaskId": null,
+  "nextTaskId": null
+}
+
+
+### ─────────────── caminos de error de la reordenación ───────────────
+
+### Tarea como vecina de sí misma → 400 VALIDATION_ERROR
+# Una tarea no puede ser anterior ni siguiente de sí misma. El servidor
+# valida la coherencia relacional para impedir ciclos en la secuencia.
+PATCH {{host}}/tasks/{{taskId3}}/reorder
+Content-Type: application/json
+
+{
+  "columnId": "{{columnId}}",
+  "previousTaskId": "{{taskId3}}",
+  "nextTaskId": null
+}
+
+
 ### ─────────────── LA decisión de diseño ───────────────
 
 ### Borrar el proyecto con la tarea dentro → 409 PROJECT_HAS_TASKS
@@ -170,6 +263,15 @@ GET {{host}}/projects/{{projectId}}
 
 ### Borrar la tarea
 DELETE {{host}}/tasks/{{taskId}}
+
+### Borrar la segunda tarea
+DELETE {{host}}/tasks/{{taskId2}}
+
+### Borrar la tercera tarea
+DELETE {{host}}/tasks/{{taskId3}}
+
+### Borrar la cuarta tarea
+DELETE {{host}}/tasks/{{taskId4}}
 
 ### Y ahora sí, el proyecto vacío se borra → 204
 DELETE {{host}}/projects/{{projectId}}

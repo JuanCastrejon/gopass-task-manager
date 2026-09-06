@@ -508,6 +508,135 @@ una **proyección de presentación** —un estado local que dice «esta tarjeta 
 no escribiendo una predicción en la caché. Al no haber predicción, el error no necesita rollback:
 se retira la proyección y la tarjeta reaparece donde el servidor dice que está.
 
+### ADR-025 — Orden manual con posición fraccionaria y restricción única
+
+**Contexto.** Con la llegada del arrastre de tareas dentro de una misma columna (SL-15), el usuario
+puede reordenar manualmente la posición de cualquier tarjeta. El modelo ingenuo de enteros continuos
+obliga a renumerar la lista entera en cada movimiento, convirtiendo un gesto local en escrituras
+proporcionales al tamaño de la columna.
+
+**Decisión.** `tasks.position` con tipo `double precision` (migración `0006_tasks_position.sql`),
+junto a la restricción `CONSTRAINT tasks_position_unica UNIQUE (column_id, position)` y cálculo
+de punto medio en el servidor (`PATCH /api/tasks/:id/reorder`):
+
+- Al mover una tarjeta entre dos existentes con posiciones $a$ y $b$, el servidor calcula $(a + b) / 2.0$ en $O(1)$.
+- Al mover al principio de la columna, asigna $b / 2.0$.
+- Al mover al final, asigna $\max(position) + 1024.0$.
+
+**Mediciones contra PostgreSQL 16 (reales, no estimadas):**
+
+| Escenario | Aguante de `double precision` | Modo de fallo |
+|---|---|---|
+| Arrastrar siempre al final (`p + 1024`) | ilimitado | ninguno |
+| Arrastrar siempre al principio (`p / 2`) | **1 084** divisiones | `SQLSTATE 22003`, ruidoso |
+| Insertar siempre en el mismo hueco `(a+b)/2` | **52** | **silencioso**: el punto medio colapsa contra el extremo |
+| Lo mismo con `numeric` | **67**, no ilimitado | igual de silencioso |
+
+**`numeric` no es la escapatoria.** La división de PostgreSQL sobre `numeric` trunca a una escala
+calculada por el motor, por lo que solo compra 15 huecos más (67 frente a 52). Es un dato
+contraintuitivo: se asume comúnmente que `numeric` proporciona precisión infinita, pero la división
+sucesiva trunca y colapsa de forma igualmente silenciosa con mayor sobrecoste de almacenamiento y CPU.
+
+**El fallo peligroso es el de 52, no el de 1 084**, porque es silencioso. Al dividir 53 veces
+consecutivas entre dos posiciones fijas, la mantisa de 53 bits de IEEE 754 colapsa numéricamente contra
+uno de los extremos (`(a + b) / 2 === a` o `b`). Sin salvaguarda, se asignarían dos posiciones idénticas
+en silencio.
+
+**La restricción única convierte el colapso silencioso en `SQLSTATE 23505`.** Medido contra PostgreSQL 16:
+la inserción número 53 es rechazada por `tasks_position_unica`, manteniendo 54 filas intactas con 54
+posiciones rigurosamente distintas.
+
+**Mismo patrón que `projects_name_unique_ci`.** En lugar de consultar antes de insertar (lo cual
+introduciría una condición de carrera), se captura el error del motor: ante un `23505` (colapso por
+precisión o colisión concurrente) o `22003` (desbordamiento tras 1 084 divisiones al principio), la
+transacción revierte al `SAVEPOINT`, rebalancea la columna en dos pasos con
+`ROW_NUMBER() OVER (...) * 1024.0` y reintenta la asignación una única vez.
+
+**La concurrencia queda resuelta por la restricción, no por bloqueos pesados.** Dos usuarios que
+arrastren simultáneamente calculando el mismo punto medio no generan posiciones duplicadas; el segundo
+obtiene un `23505` y su transacción resuelve la colisión mediante el rebalanceo automático. Sin la
+restricción única, «la última escritura gana» corrompería el orden duplicando posiciones sin aviso.
+
+**Alternativas descartadas:**
+
+1. **Entero con reindexado completo.** Es lo que implementa `sanidhyy/trello-clone` (13★, MIT,
+   `actions/update-card-order/index.ts`): el cliente manda todas las tarjetas y el servidor emite
+   N `UPDATE` en una transacción. Mover una tarjeta al principio de una lista de 50 tarjetas genera
+   **50 `UPDATE`**. Convierte un gesto local en escrituras proporcionales al tamaño de la lista y
+   multiplica la contención de bloqueos.
+2. **Entero con hueco y reindexado al agotarse.** Misma familia de soluciones; exige una lógica de
+   rebalanceo idéntica pero añade mayor complejidad en el cálculo de huecos enteros sin la elegancia
+   matemática del punto medio fraccionario.
+3. **LexoRank / claves de orden textuales.** Es la técnica empleada por Jira. Resuelve el agotamiento
+   mediante cadenas en base 36 con división léxica, pero exige incorporar o programar una biblioteca
+   compleja para un problema que la restricción única en la base ya vuelve completamente detectable y
+   reparable. **Ningún referente investigado lo usa**: `usekaneo/kaneo` (8 967★) también recurre a entero
+   llano (`position: integer("position").default(0)` en `apps/api/src/database/schema.ts`), y de hecho
+   reordena con un `forEach` que dispara **una petición HTTP independiente por tarjeta** —hasta 100
+   peticiones al mover entre dos columnas de 50, sin transacción—.
+
+**Convivencia con ADR-024.** Dos revisores independientes señalaron el riesgo de interacción: el
+orden manual convive con los órdenes automáticos (`priority_asc`, `created_desc`, etc.). Para evitar
+romperlos, `manual` es **estrictamente una rama más de la escalera de `CASE`**, nunca un desempate global:
+
+```sql
+ORDER BY pc.position,
+  CASE pc.sort WHEN 'manual'        THEN t.position   END ASC,
+  CASE pc.sort WHEN 'priority_asc'  THEN t.priority   END ASC,
+  CASE pc.sort WHEN 'priority_desc' THEN t.priority   END DESC,
+  CASE pc.sort WHEN 'created_asc'   THEN t.created_at END ASC,
+  CASE pc.sort WHEN 'created_desc'  THEN t.created_at END DESC,
+  t.created_at DESC, t.id
+```
+
+Si `t.position` se evaluara fuera del `CASE`, una columna ordenada por prioridad alteraría su secuencia
+cuando las tareas tuviesen posiciones asignadas. La prueba 2 de `api/tests/integration/tasks.test.ts`
+blinda esta garantía y se verificó rompiéndola intencionadamente.
+
+**Decisión de producto.** En columnas con orden automático (por fecha o prioridad), **el arrastre
+para reordenar queda deshabilitado en la interfaz y muestra un aviso visible**. Arrastrar una tarjeta
+no altera la configuración de la columna a escondidas; cambiar el criterio de orden es un acto deliberado
+que el usuario realiza desde el selector de la cabecera.
+
+---
+
+### ADR-026 — Cada migración en su propia transacción
+
+**Contexto.** Por defecto, `node-pg-migrate` envuelve **todas las migraciones pendientes en una única
+transacción global**. Al añadir la migración `0006_tasks_position.sql` (que incorpora el valor `'manual'`
+al enum `column_sort` mediante `ALTER TYPE ... ADD VALUE`) y la migración `0007_columnas_orden_manual_por_defecto.sql`
+(que usa ese valor en `ALTER TABLE project_columns ALTER COLUMN sort SET DEFAULT 'manual'`), ejecutar
+las migraciones sobre una base limpia fallaba inmediatamente con:
+
+```
+SQLSTATE 55P04: unsafe use of new value "manual" of enum type column_sort
+HINT: New enum values must be committed before they can be used.
+```
+
+Partir la lógica en dos archivos de migración **no bastaba**: al compartirse la transacción, PostgreSQL
+rechaza utilizar un valor de enum que no ha sido confirmado (`COMMITTED`) previamente en una transacción
+anterior.
+
+**Decisión.** Añadir el flag `--no-single-transaction` en `api/docker-entrypoint.sh` y en los scripts
+`migrate` y `migrate:down` de `api/package.json`. Con este parámetro, cada archivo de migración se ejecuta
+dentro de su propia transacción aislada, permitiendo que la transacción de la `0006` confirme el nuevo
+valor del ENUM en el catálogo antes de que la `0007` lo aplique como `DEFAULT`.
+
+**Coste aceptado.** Si una tanda de varias migraciones falla a mitad de camino, las migraciones previas
+permanecen aplicadas en la base de datos, dejando el esquema en un estado intermedio en vez de revertir
+todo el lote. Este comportamiento se acepta porque:
+1. Es el estándar de la industria adoptado por la mayoría de motores de migración (Flyway, Liquibase,
+   Prisma, Rails).
+2. Cada archivo de migración en este repositorio ya es atómico en sí mismo, aprovechando el soporte de
+   DDL transaccional de PostgreSQL.
+
+**Alternativa descartada.** No modificar el valor por defecto en el esquema de PostgreSQL y delegarlo
+exclusivamente al servicio de la aplicación (mediante un `COALESCE` en `createColumn`). Se descartó
+porque viola el principio fundacional que sustenta los triggers del repositorio (ADR-004 y ADR-009):
+**una regla que solo vive en la aplicación deja fuera al seed y a `psql`**. La base de datos es la fuente
+suprema de verdad; si una columna nueva debe nacer con orden manual, el valor por defecto debe estar
+sellado en el esquema de la tabla.
+
 ## 4. Stack final
 
 | Capa | Elección | Versión |
@@ -516,16 +645,17 @@ se retira la proyección y la tarjeta reaparece donde el servidor dice que está
 | Backend | Node + Express | 22 LTS / 4.x |
 | Validación | Zod | 3.x |
 | Datos | `pg` + patrón repositorio | 8.x |
-| Migraciones | `node-pg-migrate` | 7.x |
+| Migraciones | `node-pg-migrate` (`--no-single-transaction`) | 7.x |
 | Base de datos | PostgreSQL | 16 |
 | Frontend | React + Vite | 18.x / 5.x |
 | Estado de servidor | TanStack Query | 5.x |
 | Estilos | Tailwind CSS + lucide-react | 4.x |
 | Enrutado | propio, sobre la History API | — |
 | Modales | elemento nativo `<dialog>` | — |
-| Arrastre | `@dnd-kit/core` (ADR-021) | 6.3.1 |
+| Arrastre | `@dnd-kit/core` + `@dnd-kit/sortable` (ADR-021, ADR-025) | 6.3.1 / 10.0.0 |
 | Pruebas | Vitest + Supertest | — |
-| E2E | Playwright (9 escenarios) | — |
+| E2E | Playwright (11 escenarios) | — |
 | CI | GitHub Actions | — |
 | Gates | `sistema-multiagente-sdlc` (`quality-gate`, `coverage-diff`) | 2.2.2 |
 | Gestor de paquetes | npm | 10.x |
+

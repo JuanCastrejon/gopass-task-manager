@@ -155,12 +155,143 @@ SELECT proname, nspname …           →  gen_random_uuid | pg_catalog
 
 `CREATE EXTENSION IF NOT EXISTS pgcrypto` es un reflejo heredado de PostgreSQL 12 y anteriores. Desde la 13 la función está en `pg_catalog`. La migración no la declara.
 
-## 9. Qué cambió en la especificación por estas mediciones
+## 9. Límites de precisión del orden fraccionario (`double precision` vs `numeric`)
+
+Para la implementación del orden manual por punto medio fraccionario (SL-15), se verificó empíricamente contra PostgreSQL 16 el comportamiento de los tipos numéricos ante divisiones sucesivas.
+
+### Resumen de mediciones reales
+
+| Escenario | Aguante de `double precision` | Modo de fallo |
+|---|---|---|
+| Arrastrar siempre al final (`p + 1024`) | Ilimitado | Ninguno (crecimiento lineal estándar) |
+| Arrastrar siempre al principio (`p / 2`) | **1 084** divisiones | `SQLSTATE 22003: value out of range: underflow` (ruidoso) |
+| Insertar siempre en el mismo hueco `(a+b)/2` | **52** | **Silencioso**: el punto medio colapsa contra el extremo |
+| Lo mismo con `numeric` | **67**, no ilimitado | Igual de silencioso |
+
+### 1. Arrastre al final (`p + 1024.0`)
+El valor crece secuencialmente sin pérdida de precisión ni riesgo de desbordamiento práctico para la escala de cualquier proyecto.
+
+### 2. Arrastre al principio (`p / 2.0` sucesivo)
+Comprobación ejecutada en PostgreSQL 16:
+
+```sql
+DO $$
+DECLARE
+  p double precision := 1024.0;
+  i integer := 0;
+BEGIN
+  LOOP
+    i := i + 1;
+    BEGIN
+      p := p / 2.0;
+    EXCEPTION WHEN OTHERS THEN
+      RAISE NOTICE 'Fallo en iteracion % con SQLSTATE %: %', i, SQLSTATE, SQLERRM;
+      EXIT;
+    END;
+  END LOOP;
+END $$;
+```
+
+Salida literal del motor:
+```
+NOTICE:  Fallo en iteracion 1085 con SQLSTATE 22003: value out of range: underflow
+```
+Aguanta exactamente **1 084 divisiones consecutivas** antes de que el motor dispare el `22003`. Es un fallo **ruidoso** que la aplicación captura de inmediato para disparar el rebalanceo.
+
+### 3. Inserciones sucesivas en el mismo hueco `(a + b) / 2.0`
+Al insertar repetidamente entre dos tarjetas contiguas:
+
+```sql
+DO $$
+DECLARE
+  a double precision := 1024.0;
+  b double precision := 2048.0;
+  mid double precision;
+  i integer := 0;
+BEGIN
+  LOOP
+    i := i + 1;
+    mid := (a + b) / 2.0;
+    IF mid = a OR mid = b THEN
+      RAISE NOTICE 'Colapso silencioso en iteracion %: mid=% a=% b=%', i, mid, a, b;
+      EXIT;
+    END IF;
+    b := mid;
+  END LOOP;
+END $$;
+```
+
+Salida literal del motor:
+```
+NOTICE:  Colapso silencioso en iteracion 53: mid=1024 a=1024 b=1024.0000000000002
+```
+A partir de la iteración 53, la mantisa de 53 bits de IEEE 754 no puede distinguir el punto medio del límite inferior y colapsa a `mid = a`. Sin protección, la base guardaría dos tarjetas con la misma posición.
+
+**La restricción `tasks_position_unica (column_id, position)` lo vuelve ruidoso:**
+Al intentar insertar la fila 53 en una columna con dicha restricción:
+```
+ERROR:  duplicate key value violates unique constraint "tasks_position_unica"
+DETAIL:  Key (column_id, position)=(b10e5bb5-..., 1024) already exists.
+```
+La aplicación captura este `SQLSTATE 23505`, revierte al savepoint, ejecuta un rebalanceo en dos pasos (`ROW_NUMBER() * 1024.0`) y reintenta con éxito.
+
+### 4. La trampa de `numeric`
+Se midió el mismo algoritmo de división en hueco usando el tipo `numeric` de PostgreSQL:
+
+```sql
+DO $$
+DECLARE
+  a numeric := 1024.0;
+  b numeric := 2048.0;
+  mid numeric;
+  i integer := 0;
+BEGIN
+  LOOP
+    i := i + 1;
+    mid := (a + b) / 2.0;
+    IF mid = a OR mid = b THEN
+      RAISE NOTICE 'Numeric colapso en iteracion %: mid=% a=% b=%', i, mid, a, b;
+      EXIT;
+    END IF;
+    b := mid;
+  END LOOP;
+END $$;
+```
+
+Salida literal:
+```
+NOTICE:  Numeric colapso en iteracion 65: mid=1024.0000000000000001 a=1024.0 b=1024.0000000000000001
+```
+`numeric` no ofrece precisión infinita en división: trunca a la escala calculada y solo compra entre 12 y 15 huecos adicionales (colapsando a las 65-67 divisiones). Se descarta porque tiene el mismo modo de fallo que `double precision` pero con mayor consumo de almacenamiento y cómputo.
+
+---
+
+## 10. Transacción única en `node-pg-migrate` y `SQLSTATE 55P04`
+
+Al introducir la migración `0006_tasks_position.sql` (que añade el valor `'manual'` al enum `column_sort`) y la `0007_columnas_orden_manual_por_defecto.sql` (que lo fija como default), ejecutar `node-pg-migrate up` sobre una base limpia falló con la siguiente salida literal:
+
+```
+ERROR: unsafe use of new value "manual" of enum type column_sort
+SQLSTATE: 55P04
+DETAIL: 
+HINT: New enum values must be committed before they can be used.
+```
+
+### Causa
+`node-pg-migrate` por defecto ejecuta todas las migraciones pendientes dentro de un único bloque transaccional (`BEGIN ... COMMIT`). PostgreSQL prohíbe taxativamente referenciar un valor de ENUM añadido con `ALTER TYPE ... ADD VALUE` dentro de la misma transacción en que se creó.
+
+### Solución comprobada
+Añadir `--no-single-transaction` en la invocación de `node-pg-migrate` en `api/docker-entrypoint.sh` y en los scripts de `api/package.json`. Con este parámetro, cada archivo de migración se ejecuta en su propia transacción individual, permitiendo que `0006` confirme (`COMMIT`) el enum antes de que `0007` ejecute `SET DEFAULT 'manual'`.
+
+---
+
+## 11. Qué cambió en la especificación por estas mediciones
 
 | Documento | Cambio |
 |---|---|
-| `02-modelo-dominio.md` | Se sustituyó la justificación del `ENUM`: el argumento ya no es "el coste de `ADD VALUE` es aceptable" —premisa falsa— sino "el coste real es que no se puede retirar un valor, y se asume". Se añadió el orden de declaración como ventaja concreta y la advertencia de `array_agg`. |
-| `03-contrato-api.md` | Se añadió el contrato de casos borde del filtro y la confirmación de que `= ANY($1)` no requiere cast. Se confirmó la tabla `SQLSTATE`→HTTP. |
-| `07-defensa-tecnica.md` | Se reescribió la respuesta sobre `ENUM` para que se apoye en el límite real y no en el falso. |
-| `04-arquitectura.md` | ADR-004 pasó de "el mapeo vive en `pg-error.ts`" a "`pg-error.ts` traduce lo identificable y cada repositorio desambigua su `23503`", por la medición del §6. Se añadieron ADR-009 y ADR-010. |
-| `api/migrations/0001_initial_schema.sql` | Sin `CREATE EXTENSION pgcrypto`. FK nombrada explícitamente porque el código depende de ese nombre. Trigger `set_task_completed_at`. |
+| `02-modelo-dominio.md` | Se documentó `tasks.position`, la restricción `tasks_position_unica` y el trigger `tasks_set_position`. |
+| `03-contrato-api.md` | Se documentó el endpoint `PATCH /tasks/:id/reorder` y la traducción de errores `23505` y `22003`. |
+| `04-arquitectura.md` | Se añadieron ADR-025 (orden manual fraccionario y restricción única) y ADR-026 (transacción por migración con `--no-single-transaction`). |
+| `08-verificacion-postgres.md` | Se añadieron las 4 mediciones de precisión numérica (§9) y la evidencia del error `55P04` (§10). |
+| `api/docker-entrypoint.sh` y `package.json` | Se configuró `--no-single-transaction` en `node-pg-migrate`. |
+

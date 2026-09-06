@@ -17,9 +17,10 @@ Base: `/api`. Contenido: `application/json`. Errores: `application/problem+json`
 | POST | `/api/projects/:id/tasks` | Crear tarea en el proyecto | 201 |
 | GET | `/api/tasks/:id` | Detalle de tarea | 200 |
 | PATCH | `/api/tasks/:id` | Actualización parcial (incluye cambio de estado) | 200 |
+| PATCH | `/api/tasks/:id/reorder` | Reordenar tarea dentro o entre columnas | 200 |
 | DELETE | `/api/tasks/:id` | Eliminar tarea | 204 |
 
-Doce endpoints. No cuarenta.
+Trece endpoints. No cuarenta.
 
 ### Por qué `PATCH` y no `PUT`
 
@@ -73,10 +74,12 @@ y el agregado de `/stats` trasladado a por-proyecto lo multiplicaba por 4,3.
 {
   "id": "b2c7e0a4-3f51-4a0e-8b2d-1c9f77aa0e31",
   "projectId": "8f14e45f-ceea-467a-9a1d-9e3f3f4a2b10",
+  "columnId": "e1f2a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b",
   "title": "Definir contrato de conciliación",
   "description": null,
   "status": "IN_PROGRESS",
   "priority": "HIGH",
+  "position": 1024.0,
   "completedAt": null,
   "createdAt": "2026-09-04T14:05:00.000Z",
   "updatedAt": "2026-09-04T15:20:44.101Z"
@@ -84,6 +87,13 @@ y el agregado de `/stats` trasladado a por-proyecto lo multiplicaba por 4,3.
 ```
 
 `camelCase` en el borde HTTP, `snake_case` en PostgreSQL. La traducción vive en la capa de repositorio, en un único mapeador. Ninguna de las dos convenciones se filtra a la otra.
+
+`position` es un número fraccionario (`double precision`) que determina el orden manual dentro de la columna cuando esta tiene configurado `sort = 'manual'`. El cliente no calcula posiciones: para reordenar invoca `PATCH /api/tasks/:id/reorder` enviando `{ columnId, previousTaskId, nextTaskId }` y el servidor deriva el punto medio o el desplazamiento adecuado:
+- Si `previousTaskId` es null y `nextTaskId` está presente: se ubica al inicio de la columna (`next / 2`).
+- Si `previousTaskId` está presente y `nextTaskId` es null: se ubica a continuación de `previousTaskId` (`prev + 1024`).
+- Si ambas vecinas están presentes: se calcula el punto medio entre ambas (`(prev + next) / 2`).
+- Si ambas vecinas son null: significa explícitamente «al final de la columna» (`MAX(position) + 1024` en esa columna, o `1024` si está vacía).
+Si el hueco se agota por límite de precisión de coma flotante, la restricción única `tasks_position_unica` produce `23505` (o `22003`), y el servidor rebalancea automáticamente la columna con `ROW_NUMBER() * 1024` de forma atómica y transparente.
 
 ### `GET /api/stats`
 
