@@ -33,8 +33,8 @@
 
 ## 5. Pendiente
 
-- [ ] 5.1 ADR-031 (tema derivado con `color-mix` y ciclo fijo) en `docs/spec/04-arquitectura.md`
-- [ ] 5.2 ADR-032 (fondo como identidad compartida frente al tema como preferencia local)
-- [ ] 5.3 Mediciones de contraste en `docs/spec/08-verificacion-postgres.md`
-- [ ] 5.4 Recuentos en `README.md` y `docs/spec/05-estrategia-calidad.md`
-- [ ] 5.5 Issue enriquecido de 19 secciones y su PR
+- [x] 5.1 ADR-031 (tema derivado con `color-mix` y ciclo fijo) en `docs/spec/04-arquitectura.md`
+- [x] 5.2 ADR-032 (fondo como identidad compartida frente al tema como preferencia local)
+- [x] 5.3 Mediciones de contraste en `docs/spec/08-verificacion-postgres.md`
+- [x] 5.4 Recuentos en `README.md` y `docs/spec/05-estrategia-calidad.md`
+- [x] 5.5 Issue enriquecido de 19 secciones y su PR

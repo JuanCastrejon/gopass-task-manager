@@ -12,10 +12,10 @@ El reparto no es doctrinal, es de retorno por hora dentro de un plazo de 20 hora
 
 | Tipo | Peso | Por qué |
 |---|---|---|
-| **Integración de API contra PostgreSQL real** | ~65 % | **137 pruebas** (125 integración + 12 unitarias de `pg-error`). Una sola prueba de `POST /projects → POST /tasks → PATCH status → GET` ejercita middleware, Zod, ruta, repositorio, SQL parametrizado y las restricciones reales del motor. Ningún otro tipo de prueba cubre tanto por línea escrita. |
+| **Integración de API contra PostgreSQL real** | ~65 % | **148 pruebas** (131 integración + 17 unitarias: 12 de `pg-error` y 5 de `pool-config`). Una sola prueba de `POST /projects → POST /tasks → PATCH status → GET` ejercita middleware, Zod, ruta, repositorio, SQL parametrizado y las restricciones reales del motor. Ningún otro tipo de prueba cubre tanto por línea escrita. |
 | **Unitarias de lógica no trivial** | ~15 % | Solo el mapeo `SQLSTATE`→HTTP, el cálculo de avance, la regla de `completed_at` y el semáforo puro de vencimiento. No se prueban getters ni se simula `pg`: simular el driver prueba el simulador. |
-| **Componentes de React y frontend** | ~10 % | **52 pruebas**. Los estados vacío, cargando y error de la vista de proyecto, con la API simulada a nivel de `fetch`, pruebas de filtros, tablero, 5 pruebas de completar tarea de un clic (SL-16), 14 pruebas unitarias de fechas de vencimiento (SL-17) y 10 pruebas de gestión y asignación de etiquetas (SL-18). |
-| **E2E con Playwright** | ~10 % | **15 escenarios**. Desde el ciclo completo y conflicto de borrado hasta columnas configurables, límites de WIP, arrastre entre columnas, reordenación manual (SL-15), completar de un clic (SL-16), fecha de vencimiento con semáforo (SL-17) y etiquetas de color (SL-18). |
+| **Componentes de React y frontend** | ~10 % | **85 pruebas**. Los estados vacío, cargando y error de la vista de proyecto, con la API simulada a nivel de `fetch`, pruebas de filtros, tablero, 5 pruebas de completar tarea de un clic (SL-16), 14 pruebas unitarias de fechas de vencimiento (SL-17) y 10 pruebas de gestión y asignación de etiquetas (SL-18). |
+| **E2E con Playwright** | ~10 % | **24 escenarios**. Desde el ciclo completo y conflicto de borrado hasta columnas configurables, límites de WIP, arrastre entre columnas, reordenación manual (SL-15), completar de un clic (SL-16), fecha de vencimiento con semáforo (SL-17) y etiquetas de color (SL-18). |
 
 ### Aislamiento: una base por worker de Vitest
 

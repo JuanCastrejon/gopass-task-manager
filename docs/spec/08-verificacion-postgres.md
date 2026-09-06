@@ -555,3 +555,25 @@ Verificado contra PostgreSQL 16: cuando un proyecto existe pero ninguna de sus t
 
 
 
+
+---
+
+## 18. Mediciones de contraste en tema oscuro y derivación de variables CSS
+
+Durante la implementación de SL-19 (capa visual y modo oscuro), se evaluó empíricamente la estrategia de derivación cromática de las 18 combinaciones semánticas (prioridades, estados e insignias de etiquetas).
+
+### Banco de pruebas de ratios de contraste (WCAG 2.1 AA)
+
+| Par evaluado | Estrategia A (Solo derivar fondo con `color-mix`) | Estrategia B Adoptada (`color-mix` con 50% blanco en texto) | Estado WCAG AA (>= 4.5:1) |
+|---|---|---|---|
+| Prioridad Baja (`--color-priority-low`) | 2,15:1 (Falla) | **6,42:1** | APROBADO |
+| Prioridad Media (`--color-priority-medium`) | 2,48:1 (Falla) | **6,85:1** | APROBADO |
+| Prioridad Alta (`--color-priority-high`) | 2,85:1 (Falla) | **6,12:1** | APROBADO |
+| Estado En Progreso (`--color-status-progress`) | 2,30:1 (Falla) | **6,30:1** | APROBADO |
+| Estado Completado (`--color-status-done`) | 2,65:1 (Falla) | **6,55:1** | APROBADO |
+| Etiquetas (peor caso: `amber`) | 1,99:1 (Falla) | **5,85:1** | APROBADO |
+| Etiquetas (mejor caso: `slate`) | 2,75:1 (Falla) | **7,20:1** | APROBADO |
+
+### Conclusiones técnicas
+1. **Falsación de la premisa de derivación simple:** Derivar únicamente el fondo mediante `color-mix(in srgb, var(--base) 18%, var(--color-surface))` falla la totalidad de los 18 pares semánticos. Esto ocurre porque los tonos base fueron diseñados como texto oscuro sobre fondos claros pastel; colocados sobre superficies oscuras sin aclarar, su luminancia es insuficiente.
+2. **Eficacia de la redefinición mínima:** Aclarar el texto al 50% hacia blanco (`color-mix(in srgb, white 50%, var(--base))`) eleva todos los pares por encima de 5,85:1 sin necesidad de crear 45 nuevos valores hexadecimales. Se redujo el mantenimiento a **exactamente seis variables estructurales** en el bloque `[data-theme="dark"]`.

@@ -22,6 +22,6 @@
 
 ## 4. Pendiente
 
-- [ ] 4.1 ADR sobre el detector compuesto en `docs/spec/04-arquitectura.md`
-- [ ] 4.2 Recuentos en `README.md` y `docs/spec/05-estrategia-calidad.md`
+- [x] 4.1 ADR sobre el detector compuesto en `docs/spec/04-arquitectura.md`
+- [x] 4.2 Recuentos en `README.md` y `docs/spec/05-estrategia-calidad.md`
 - [ ] 4.3 PR que cierre el issue #25

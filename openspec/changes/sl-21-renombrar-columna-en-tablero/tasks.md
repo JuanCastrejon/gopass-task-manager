@@ -16,6 +16,6 @@
 
 ## 3. Pendiente
 
-- [ ] 3.1 ADR sobre el patrón de edición en el sitio y por qué `aria-label` y no `title`
-- [ ] 3.2 Recuentos en `README.md` y `docs/spec/05-estrategia-calidad.md`
+- [x] 3.1 ADR sobre el patrón de edición en el sitio y por qué `aria-label` y no `title`
+- [x] 3.2 Recuentos en `README.md` y `docs/spec/05-estrategia-calidad.md`
 - [ ] 3.3 PR que cierre el issue #26
