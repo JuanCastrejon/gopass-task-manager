@@ -17,6 +17,7 @@ export const ERROR_CODES = {
   COLUMN_HAS_TASKS: 'COLUMN_HAS_TASKS',
   COLUMN_NAME_TAKEN: 'COLUMN_NAME_TAKEN',
   LAST_COLUMN_OF_CATEGORY: 'LAST_COLUMN_OF_CATEGORY',
+  WIP_TEMPLATE_NO_TARGET: 'WIP_TEMPLATE_NO_TARGET',
   LABEL_NOT_FOUND: 'LABEL_NOT_FOUND',
   LABEL_NAME_TAKEN: 'LABEL_NAME_TAKEN',
   LABEL_HAS_TASKS: 'LABEL_HAS_TASKS',
@@ -144,6 +145,22 @@ export class LastColumnOfCategoryError extends AppError {
     super(409, ERROR_CODES.LAST_COLUMN_OF_CATEGORY,
       `Es la última columna de tipo "${categoria}" del proyecto. Crea otra equivalente antes de eliminarla.`,
       cause !== undefined ? { cause } : undefined);
+  }
+}
+
+/**
+ * La plantilla «flujo controlado» no encontró ninguna columna de trabajo en
+ * curso a la que aplicar el límite.
+ *
+ * Es 500 y no 4xx a propósito: el cliente no pidió nada inválido. Si esto
+ * ocurre, el tablero por defecto que crea el trigger dejó de incluir una
+ * columna `IN_PROGRESS`, y quien tiene que enterarse es quien mantiene el
+ * esquema, no quien estaba creando un proyecto.
+ */
+export class WipTemplateNoTargetError extends AppError {
+  constructor() {
+    super(500, ERROR_CODES.WIP_TEMPLATE_NO_TARGET,
+      'No se pudo aplicar la plantilla de límites: el tablero inicial no tiene ninguna columna de trabajo en curso.');
   }
 }
 

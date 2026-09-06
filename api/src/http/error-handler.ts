@@ -27,6 +27,7 @@ const TITLES: Record<ErrorCode, string> = {
   COLUMN_HAS_TASKS: 'La columna tiene tareas asociadas',
   COLUMN_NAME_TAKEN: 'Nombre de columna en uso',
   LAST_COLUMN_OF_CATEGORY: 'Última columna de su categoría',
+  WIP_TEMPLATE_NO_TARGET: 'La plantilla de límites no encontró destino',
   LABEL_NOT_FOUND: 'Etiqueta no encontrada',
   LABEL_NAME_TAKEN: 'Nombre de etiqueta en uso',
   LABEL_HAS_TASKS: 'La etiqueta tiene tareas asociadas',
