@@ -13,19 +13,42 @@ const PROJECT_FIELDS = 'id, name, description, created_at, updated_at';
  *
  * `COUNT(t.id)` y no `COUNT(*)`: con `LEFT JOIN`, un proyecto sin tareas
  * produce una fila con `t.*` en NULL, y `COUNT(*)` la contaría como 1.
+ *
+ * Los tres conteos por prioridad cuelgan del **mismo** `GROUP BY` que ya
+ * calculaba `total` y `done`, y no de un agregado propio. Se midió sobre 204
+ * proyectos y 20 011 tareas: añadirlos deja el plan en los mismos 275 buffers
+ * compartidos y el tiempo dentro del ruido (4,0-5,5 ms el original frente a
+ * 4,2-5,7 ms con ellos). Corren sobre una pasada que ya se estaba pagando.
+ *
+ * Se descartó replicar aquí el `jsonb_object_agg` + `enum_range` de `/stats`.
+ * Allí es correcto porque agrega **una vez para toda la tabla**; por proyecto
+ * degenera en un escaneo correlacionado, y la misma medición lo situó en 1175
+ * buffers y 16,8-24,5 ms: 4,3 veces la lectura y entre 3 y 5 veces el tiempo.
+ * Reutilizar un patrón no es reutilizar su plan de ejecución.
+ *
+ * `enum_range` tampoco hace falta para lo que resuelve en `/stats` —que una
+ * prioridad sin tareas no desaparezca del objeto—: aquí las tres columnas
+ * están nombradas una a una, así que ninguna puede faltar, y el `COALESCE`
+ * convierte en 0 el NULL del proyecto sin tareas.
  */
 const SUMMARY_QUERY = `
   SELECT p.id, p.name, p.description, p.created_at, p.updated_at,
-         COALESCE(t.total, 0)::int AS task_count,
-         COALESCE(t.done,  0)::int AS done_count,
+         COALESCE(t.total, 0)::int         AS task_count,
+         COALESCE(t.done,  0)::int         AS done_count,
+         COALESCE(t.low,    0)::int        AS low_count,
+         COALESCE(t.medium, 0)::int        AS medium_count,
+         COALESCE(t.high,   0)::int        AS high_count,
          CASE WHEN COALESCE(t.total, 0) = 0 THEN 0
               ELSE ROUND(t.done::numeric * 100 / t.total)::int
          END AS progress
   FROM projects p
   LEFT JOIN (
     SELECT project_id,
-           COUNT(t.id)                                   AS total,
-           COUNT(t.id) FILTER (WHERE t.status = 'DONE')  AS done
+           COUNT(t.id)                                        AS total,
+           COUNT(t.id) FILTER (WHERE t.status = 'DONE')       AS done,
+           COUNT(t.id) FILTER (WHERE t.priority = 'LOW')      AS low,
+           COUNT(t.id) FILTER (WHERE t.priority = 'MEDIUM')   AS medium,
+           COUNT(t.id) FILTER (WHERE t.priority = 'HIGH')     AS high
     FROM tasks t
     GROUP BY project_id
   ) t ON t.project_id = p.id

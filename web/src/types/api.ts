@@ -24,6 +24,12 @@ export interface Project {
 export interface ProjectSummary extends Project {
   taskCount: number;
   doneCount: number;
+  /**
+   * Cuántas tareas de cada prioridad tiene el proyecto. Las tres claves llegan
+   * siempre, también en 0, así que el filtro del panel puede preguntar
+   * `byPriority[p] > 0` sin defenderse de una clave ausente.
+   */
+  byPriority: Record<TaskPriority, number>;
   progress: number;
 }
 

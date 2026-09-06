@@ -3,6 +3,15 @@ import { z } from 'zod';
 export const TASK_STATUSES = ['TODO', 'IN_PROGRESS', 'DONE'] as const;
 export const TASK_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH'] as const;
 
+/**
+ * El dominio se declara una sola vez y los tipos se derivan de él. Antes la
+ * unión estaba además escrita a mano en `tasks.mapper.ts`, así que añadir una
+ * prioridad exigía acordarse de tocar dos sitios y el compilador no avisaba
+ * del que faltara.
+ */
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
+
 export const taskIdParamsSchema = z.object({
   id: z.string().uuid('El identificador debe ser un UUID.'),
 });

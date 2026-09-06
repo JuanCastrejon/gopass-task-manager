@@ -109,6 +109,33 @@ describe('GET /api/projects', () => {
     expect(typeof res.body[0].taskCount).toBe('number');
     expect(typeof res.body[0].progress).toBe('number');
   });
+
+  it('desglosa las tareas por prioridad, con las tres claves siempre presentes', async () => {
+    const { body: proyecto } = await crearProyecto({ name: 'Con prioridades' });
+    const { pool } = await import('../../src/db/pool.js');
+    await pool.query(
+      `INSERT INTO tasks (project_id, title, priority) VALUES
+         ($1,'a','HIGH'), ($1,'b','HIGH'), ($1,'c','LOW')`,
+      [proyecto.id],
+    );
+
+    const res = await request(app).get('/api/projects');
+
+    // `MEDIUM` en 0 y no ausente: el cliente filtra con `byPriority[p] > 0` y
+    // una clave que falta lo obligaría a defenderse con `?? 0`.
+    expect(res.body[0].byPriority).toEqual({ LOW: 1, MEDIUM: 0, HIGH: 2 });
+  });
+
+  it('un proyecto sin tareas trae las tres prioridades en 0, no en null', async () => {
+    await crearProyecto({ name: 'Vacío' });
+    const res = await request(app).get('/api/projects');
+
+    // El `LEFT JOIN` deja los agregados en NULL cuando no hay tareas; sin el
+    // COALESCE llegarían como null y `null > 0` sería false por accidente y
+    // no por diseño.
+    expect(res.body[0].byPriority).toEqual({ LOW: 0, MEDIUM: 0, HIGH: 0 });
+    expect(typeof res.body[0].byPriority.HIGH).toBe('number');
+  });
 });
 
 describe('GET /api/projects/:id', () => {
@@ -118,6 +145,25 @@ describe('GET /api/projects/:id', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ id: creado.id, name: 'Detalle', taskCount: 0 });
+  });
+
+  it('el detalle trae el mismo desglose por prioridad que el listado', async () => {
+    const { body: creado } = await crearProyecto({ name: 'Detalle con prioridades' });
+    const { pool } = await import('../../src/db/pool.js');
+    await pool.query(
+      `INSERT INTO tasks (project_id, title, priority) VALUES ($1,'a','MEDIUM')`,
+      [creado.id],
+    );
+
+    // Listado y detalle comparten `SUMMARY_QUERY`. Esta prueba es la que
+    // avisaría si alguien añadiera una columna solo a una de las dos rutas.
+    const [listado, detalle] = await Promise.all([
+      request(app).get('/api/projects'),
+      request(app).get(`/api/projects/${creado.id}`),
+    ]);
+
+    expect(detalle.body.byPriority).toEqual({ LOW: 0, MEDIUM: 1, HIGH: 0 });
+    expect(detalle.body.byPriority).toEqual(listado.body[0].byPriority);
   });
 
   it('404 con un uuid válido que no existe', async () => {

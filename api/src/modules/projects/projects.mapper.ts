@@ -3,6 +3,8 @@
  * del borde HTTP. Ninguna de las dos convenciones se filtra a la otra.
  */
 
+import type { TaskPriority } from '../tasks/tasks.schema.js';
+
 export interface ProjectRow {
   id: string;
   name: string;
@@ -14,6 +16,9 @@ export interface ProjectRow {
 export interface ProjectSummaryRow extends ProjectRow {
   task_count: number;
   done_count: number;
+  low_count: number;
+  medium_count: number;
+  high_count: number;
   progress: number;
 }
 
@@ -28,6 +33,16 @@ export interface Project {
 export interface ProjectSummary extends Project {
   taskCount: number;
   doneCount: number;
+  /**
+   * Cuántas tareas de cada prioridad tiene el proyecto. Las tres claves están
+   * siempre presentes, también cuando valen 0: un consumidor no debería tener
+   * que saberse el dominio ni defenderse con `?? 0` para pintar el desglose.
+   *
+   * En la base son tres columnas y aquí un objeto: la forma del contrato no
+   * tiene por qué copiar la del agregado, y el listado y el detalle comparten
+   * la misma consulta, así que ambos lo devuelven.
+   */
+  byPriority: Record<TaskPriority, number>;
   progress: number;
 }
 
@@ -46,6 +61,11 @@ export function toProjectSummary(row: ProjectSummaryRow): ProjectSummary {
     ...toProject(row),
     taskCount: row.task_count,
     doneCount: row.done_count,
+    byPriority: {
+      LOW: row.low_count,
+      MEDIUM: row.medium_count,
+      HIGH: row.high_count,
+    },
     progress: row.progress,
   };
 }
