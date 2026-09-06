@@ -211,10 +211,19 @@ export interface Task {
   updatedAt: string;
 }
 
+/**
+ * Plantilla de límite de trabajo en curso, aplicable **solo al crear**: en ese
+ * momento las columnas todavía no existen. Después se editan una a una, con el
+ * PATCH de columna, que escribe el mismo campo.
+ */
+export const WIP_TEMPLATES = ['sin_limites', 'flujo_controlado'] as const;
+export type WipTemplate = (typeof WIP_TEMPLATES)[number];
+
 export interface CreateProjectInput {
   name: string;
   description?: string | null;
   background?: ProjectBackground;
+  wipTemplate?: WipTemplate;
 }
 
 export interface PatchProjectInput {

@@ -70,7 +70,7 @@ export function ColumnManagerDialog({ open, onClose, projectId, columnas }: Prop
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Columnas del tablero">
+    <Modal open={open} onClose={onClose} title="Columnas y límites">
       <div className="space-y-4">
         <ul className="space-y-2">
           {columnas.map((col, indice) => (

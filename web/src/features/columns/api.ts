@@ -14,10 +14,17 @@ export const columnKeys = {
   byProject: (projectId: string) => [...columnKeys.all, projectId] as const,
 };
 
-export function useColumns(projectId: string) {
+/**
+ * `enabled` existe porque el diálogo de proyecto monta este hook también al
+ * crear, cuando todavía no hay proyecto del que pedir columnas. Sin la guarda
+ * saldría una petición a `/projects//columns`, que es un 400 por UUID inválido
+ * por cada tarjeta del panel.
+ */
+export function useColumns(projectId: string, enabled = true) {
   return useQuery({
     queryKey: columnKeys.byProject(projectId),
     queryFn: () => api.get<ProjectColumnSummary[]>(`/projects/${projectId}/columns`),
+    enabled: enabled && projectId !== '',
   });
 }
 
