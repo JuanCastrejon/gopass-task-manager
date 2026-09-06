@@ -1,3 +1,204 @@
 # GoPass Task Manager
 
-Aplicación de gestión de tareas por proyectos — React 18, Express, PostgreSQL 16 y TypeScript estricto.
+Gestión de tareas por proyectos. **React 18 · Node/Express · PostgreSQL 16.**
+
+## Requisitos
+
+**Para levantar el proyecto solo hace falta Docker.** Node, npm y PostgreSQL viven dentro de los contenedores; no hay que instalarlos en el equipo ni hacer coincidir versiones con las del anfitrión.
+
+| | Versión | Por qué esa |
+|---|---|---|
+| **Docker Engine** | 20.10 o superior | Necesario para `healthcheck` y la sintaxis de `depends_on: condition` que usa `docker-compose.yml` |
+| **Docker Compose** | v2 (el comando `docker compose`, sin guion) | El archivo no declara `version:`, que v1 exige |
+
+Comprobado con Docker 29.7.2 y Compose 5.5.0. Si `docker compose version` responde, está todo.
+
+```bash
+docker compose up --build
+```
+
+Levanta PostgreSQL, aplica las once migraciones, siembra los datos de ejemplo y publica la aplicación. La primera vez tarda un par de minutos construyendo las imágenes; las siguientes, segundos.
+
+**Solo si vas a trabajar fuera de los contenedores** hacen falta además:
+
+| | Versión | Por qué esa |
+|---|---|---|
+| **Node.js** | 22 recomendada, 20 el mínimo | `package.json` declara `"engines": { "node": ">=20" }`; las imágenes y la integración continua usan 22, así que es la única versión con la que se comprueba de verdad |
+| **npm** | 10 o superior | La que acompaña a Node 20 y 22 |
+
+Ese camino está descrito más abajo, en **Desarrollo fuera de contenedores**. No hace falta para evaluar el proyecto.
+
+| | |
+|---|---|
+| **Aplicación** | <http://localhost:5173> |
+| **API documentada (Swagger UI)** | <http://localhost:5173/api/docs/> |
+
+El navegador consume la API por la ruta relativa `/api` sobre ese mismo origen, así que no hace falta configurar CORS ni conocer un segundo puerto. La API también se publica en <http://localhost:3000> para atacarla directamente con `curl` o Postman; es una puerta de diagnóstico, no la de uso normal.
+
+**O sin instalar nada, en producción:**
+
+| | |
+|---|---|
+| **Aplicación** | <https://gopass-task-manager-web.vercel.app> |
+| **API** | <https://gopass-task-manager-api.vercel.app> |
+| **Swagger UI** | <https://gopass-task-manager-api.vercel.app/docs> |
+
+Web y API son dos proyectos independientes en Vercel, no un empaquetado conjunto. El navegador sigue pidiendo a `/api` —la misma ruta relativa que en local—, y un *rewrite* declarado en `web/vercel.json` la reenvía a la API. El bundle de Vite no lleva dentro ninguna URL de producción y no hay CORS que configurar en ningún ambiente. La base es PostgreSQL en Supabase, alcanzada por su pooler transaccional.
+
+**Si alguno de esos puertos está ocupado**, se cambian sin tocar código: `WEB_PORT`, `API_PORT` y `POSTGRES_PORT` en `.env`. Dentro de la red de Docker los servicios siguen hablando por sus puertos nativos, así que solo cambia lo que se publica en el host.
+
+```bash
+WEB_PORT=8090 API_PORT=8091 POSTGRES_PORT=55433 docker compose up --build
+```
+
+![Panel de proyectos](docs/assets/panel.png)
+
+---
+
+## Qué hace
+
+Crear proyectos, asociarles tareas con estado y prioridad, y ver el trabajo de forma que responda preguntas: cuánto queda, qué está en curso, qué es urgente.
+
+| | |
+|---|---|
+| **Panel** | Totales, avance global y reparto de tareas por estado, agregados en la base de un solo viaje |
+| **Proyectos** | Alta, edición y borrado, con barra de avance calculada en SQL |
+| **Tablero** | Columnas **configurables por proyecto**: crear, renombrar desde su propia cabecera, reordenar y borrar reasignando lo que contienen |
+| **Límite de trabajo en curso** | Opcional y por columna, no por proyecto: «Desarrollo máximo 3» y «QA máximo 2» son políticas distintas y coexisten. Se elige al crear el proyecto con una plantilla, y se ajusta después columna a columna desde «Editar» |
+| **Orden de las tarjetas** | Por columna, entre cinco criterios o manual arrastrando, con posición fraccionaria para no reescribir la columna entera |
+| **Tarjetas** | Fecha de vencimiento con semáforo temporal, etiquetas de color y completado en un clic |
+| **Filtros** | Viven en la URL: un tablero filtrado se comparte por enlace y sobrevive a una recarga |
+| **Aspecto** | Tema claro y oscuro con contraste verificado, y fondo de tablero elegible por proyecto |
+
+![Tablero de tareas](docs/assets/tablero.png)
+
+## Vídeo de demostración
+
+**[docs/assets/demo.mp4](docs/assets/demo.mp4)** — 2 min 48 s, con locución. Añadir una columna y renombrarla desde su cabecera, poner el límite de trabajo en curso desde «Editar proyecto» y agotarlo hasta que el tablero rechaza la tercera tarjeta, el contrato publicado en Swagger, y el conflicto que devuelve la base al intentar borrar un proyecto que todavía tiene tareas.
+
+Está dentro del repositorio a propósito: la entrega no depende de ningún servicio externo que pueda caducar o cambiar de permisos. GitHub no reproduce en línea un MP4 enlazado desde el README, así que el enlace lo abre o lo descarga.
+
+## Cinco decisiones que definen este proyecto
+
+**1. Borrar un proyecto con tareas devuelve 409, no borra en cascada.**
+La restricción es `ON DELETE RESTRICT` y la impone PostgreSQL. Prefiero un borrado que falla de forma explicable a uno que destruye trabajo en silencio.
+
+**2. La integridad se comprueba en el motor, no en memoria.**
+No se consulta «¿tiene tareas?» antes de borrar: entre ese `SELECT` y el `DELETE` cabría un `INSERT` de otra petición. Se ejecuta la operación y se traduce el error que devuelve el motor.
+
+**3. Los dos casos de `SQLSTATE 23503` son indistinguibles.**
+Medido contra PostgreSQL 16: borrar un padre con hijos e insertar un hijo sin padre devuelven el mismo `code`, `constraint`, `table`, `schema` y `routine`. Como deben responder 409 y 404, la desambiguación no puede vivir en un traductor genérico: vive en cada repositorio, que sí sabe qué operación estaba ejecutando.
+
+**4. `completed_at` lo sella la base de datos, no la aplicación.**
+Un `CHECK` verifica la invariante `DONE ⟺ completed_at IS NOT NULL` y un trigger la satisface. La prueba de que funciona es que el script de datos de ejemplo **no menciona esa columna** y sus tareas completadas la tienen. La API rechaza con 400 cualquier intento de escribirla.
+
+**5. Sin ORM y sin librería de enrutado.**
+Dos entidades no justifican una abstracción que oculta el control granular del SQL y los planes de ejecución; el patrón repositorio da el mismo aislamiento. Para el enrutado se midió el coste real de `react-router-dom` en este bundle —**+13.4 KB gzip para dos rutas**— y se resolvió con la History API.
+
+El registro completo son **36 ADRs** en [docs/spec/04-arquitectura.md](docs/spec/04-arquitectura.md), cada uno con su contexto, sus alternativas descartadas y por qué.
+
+## Arquitectura
+
+```
+web/   React 18 · Vite · TanStack Query · Tailwind
+       Validación de formularios → experiencia de usuario
+         │  HTTP · ruta relativa /api (proxy de Vite en dev, nginx en Docker)
+         ▼
+api/   Express · TypeScript estricto · Zod · pg
+       Zod es la FRONTERA DE CONFIANZA. Errores en RFC 7807.
+         │  pg (pool)
+         ▼
+PostgreSQL 16
+       FK · CHECK · ENUM · UNIQUE · triggers · índices
+       INTEGRIDAD. La última palabra.
+```
+
+Las tres capas validan cosas distintas: el formulario, para no molestar al servidor con datos incompletos; la API, porque el frontend se puede saltar con `curl`; y la base, porque la API puede tener un fallo.
+
+Monolito modular con módulos por dominio (`projects`, `columns`, `tasks`, `labels`, `stats`).
+
+## API
+
+Veintitrés endpoints. Errores en `application/problem+json` (RFC 7807) con un `code` estable que el frontend traduce; `X-Request-Id` en **todas** las respuestas, no solo en los fallos.
+
+| | Ruta | |
+|---|---|---|
+| `GET` | `/api/health` | Estado del proceso y de la base |
+| `GET` | `/api/stats` | Agregados del panel |
+| `GET · POST` | `/api/projects` | Listar con avance · crear |
+| `GET · PATCH · DELETE` | `/api/projects/:id` | Detalle · edición parcial · borrado (**409** si tiene tareas) |
+| `GET · POST` | `/api/projects/:id/columns` | Listar columnas del tablero · crear columna |
+| `PATCH` | `/api/projects/:id/columns/reorder` | Reordenar el conjunto en una transacción, no columna a columna |
+| `PATCH · DELETE` | `/api/projects/:id/columns/:columnId` | Nombre, límite y criterio de orden · borrado (**409** si tiene tareas y no se indica `?reassignTo`) |
+| `GET · POST` | `/api/projects/:id/tasks` | Listar con filtros · crear |
+| `GET · PATCH · DELETE` | `/api/tasks/:id` | Detalle · edición parcial · borrado |
+| `PATCH` | `/api/tasks/:id/reorder` | Posición manual dentro de la columna |
+| `GET · POST` | `/api/projects/:id/labels` | Listar etiquetas del proyecto · crear etiqueta |
+| `PATCH · DELETE` | `/api/labels/:id` | Edición de etiqueta · borrado (`?confirm=true` si tiene tareas) |
+| `PUT` | `/api/tasks/:id/labels` | Reemplazo atómico de etiquetas de la tarea |
+
+**[docs/api.http](docs/api.http)** es una colección ejecutable: se lanza desde VS Code con REST Client o desde JetBrains y recorre el ciclo completo, incluidos todos los caminos de error. El contrato exhaustivo —payloads, catálogo de códigos y el mapeo `SQLSTATE`→HTTP— está en [docs/spec/03-contrato-api.md](docs/spec/03-contrato-api.md).
+
+## Calidad
+
+```
+274 pruebas    155 backend (integración contra PostgreSQL real) · 93 frontend · 26 E2E
+96.61 %       cobertura de líneas del backend funcional
+```
+
+Las pruebas de integración corren contra PostgreSQL de verdad, no contra un doble del driver: cada worker crea su propia base (`gopass_tasks_test_<id>`), aplica las migraciones y trunca entre casos, así que los archivos siguen ejecutándose en paralelo. Simular el driver probaría el simulador.
+
+Los escenarios E2E cubren lo único que la integración no puede: que el estado venga de PostgreSQL y no de React —de ahí la recarga en mitad del flujo—, que el 409 **llegue a los ojos del usuario** y no solo al cuerpo de la respuesta, y que arrastrar una tarjeta la deje en la posición prometida y no en otra.
+
+Cada prueba se validó rompiendo a propósito el código que cubre y comprobando que falla, antes de deshacer la rotura. Una prueba que nunca se ha visto en rojo no ha demostrado nada.
+
+```bash
+npm run test        # backend + frontend
+npm run test:e2e    # Playwright (requiere docker compose up -d db)
+```
+
+El [pipeline de CI](.github/workflows/ci.yml) ejecuta lint, typecheck, las pruebas contra un PostgreSQL real, ambos builds, los E2E y un quality gate. Estrategia completa y matriz de trazabilidad de los 17 requisitos en [docs/spec/05-estrategia-calidad.md](docs/spec/05-estrategia-calidad.md).
+
+## Desarrollo fuera de contenedores
+
+```bash
+npm run install:all      # raíz, api/ y web/
+cp .env.example .env
+docker compose up -d db  # solo la base
+npm run dev              # api y web, en los puertos de `.env`
+```
+
+El cliente pide siempre a `/api`, una ruta relativa: la reenvía el proxy de Vite en desarrollo y nginx en Docker. No hay configuración de CORS por ambiente ni URL de backend dentro del bundle. `API_PORT` y `WEB_PORT` valen aquí igual que en Compose.
+
+| Comando | |
+|---|---|
+| `npm run reset` | Rehace la base desde cero con los datos de ejemplo |
+| `SEED_ON_START=false` | Arranca con la base migrada y **vacía**, para ver la aplicación sin datos |
+| `npm run migrate` · `npm run seed` | Migraciones y datos por separado |
+| `npm run lint` · `npm run typecheck` | Lo mismo que ejecuta CI |
+
+## Alcance
+
+Se acotó de forma explícita y por escrito **antes** de empezar. Los requisitos, con sus criterios de aceptación y la lista de lo descartado con su razón, están en [docs/spec/01-requisitos.md](docs/spec/01-requisitos.md).
+
+Fuera de alcance: **autenticación y roles** (no están en el enunciado y traen consigo un modelo de identidad completo), **paginación** (no aporta a este volumen; el umbral a partir del cual sería obligatoria está documentado) y **borrado lógico y auditoría** (sin requisito de trazabilidad, contaminan todas las consultas).
+
+Lo que sí creció después del alcance inicial, y por qué se dejó entrar: el límite de trabajo en curso (SL-12), las columnas configurables y su criterio de orden (SL-13 y SL-14), el orden manual de tarjetas (SL-15), el completado en un clic (SL-16), las fechas de vencimiento (SL-17), las etiquetas de color (SL-18), el tema oscuro y el fondo de tablero (SL-19), y dos correcciones del arrastre (SL-20 y SL-21). Cada uno tiene su *slice* en `openspec/changes/` y su issue con criterios de aceptación.
+
+Límites conocidos del diseño actual: en edición concurrente gana la última escritura —con concurrencia real entraría una columna `version` y un 412—, reasignar una tarea a otro proyecto existe en la API pero todavía no en la interfaz, y el semáforo de vencimiento se calcula en el cliente porque PostgreSQL prohíbe funciones no inmutables en columnas generadas y ningún trigger se dispara a medianoche.
+
+## Documentación
+
+| | |
+|---|---|
+| [Requisitos y trazabilidad](docs/spec/01-requisitos.md) | RF y RNF con criterios de aceptación; qué queda fuera y por qué |
+| [Modelo de dominio](docs/spec/02-modelo-dominio.md) | DDL completo, invariantes y decisiones de modelado |
+| [Contrato de API](docs/spec/03-contrato-api.md) | Endpoints, errores RFC 7807, mapeo `SQLSTATE`→HTTP |
+| [Arquitectura](docs/spec/04-arquitectura.md) | Capas, estructura y los 36 ADRs |
+| [Estrategia de calidad](docs/spec/05-estrategia-calidad.md) | Pruebas, CI, quality gates y matriz de trazabilidad |
+| [Verificación de PostgreSQL](docs/spec/08-verificacion-postgres.md) | Mediciones contra el motor que decidieron el modelo de datos |
+| [Desarrollo asistido por IA](docs/process/ai-assisted-development.md) | Cómo se trabajó y qué se verificó |
+
+## Stack
+
+TypeScript estricto en ambos extremos (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`). Express 4 · Zod · `pg` · `node-pg-migrate` · PostgreSQL 16 · React 18 · Vite 6 · TanStack Query 5 · Tailwind 4 · `@dnd-kit` · `lucide-react` · Vitest · Supertest · Playwright · Docker Compose · GitHub Actions · Vercel · Supabase.

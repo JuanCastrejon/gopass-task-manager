@@ -1,0 +1,428 @@
+### GoPass Task Manager — colección ejecutable de la API
+#
+# Dieciocho endpoints. Se ejecuta desde VS Code con la extensión REST Client
+# (`humao.rest-client`) o desde JetBrains, pulsando «Send Request» sobre cada
+# bloque. Sirve además de guion: el orden de abajo recorre el ciclo completo,
+# incluidos los caminos de error.
+#
+# Requisito: `docker compose up --build`.
+
+@host = http://localhost:3000/api
+
+
+### Salud — lo que consume el healthcheck de Docker
+GET {{host}}/health
+
+
+### Agregados del panel. Una sola consulta en la base, no un conteo en el cliente.
+# Las claves de `byStatus` y `byPriority` vienen siempre completas, con 0
+# incluido: un consumidor no debería tener que conocerse el dominio.
+GET {{host}}/stats
+
+
+### Listar proyectos con su avance
+# `taskCount`, `doneCount` y `progress` salen de una sola consulta con
+# agregación condicional. Un proyecto sin tareas devuelve `progress: 0`.
+GET {{host}}/projects
+
+
+### Crear un proyecto
+# @name crearProyecto
+POST {{host}}/projects
+Content-Type: application/json
+
+{
+  "name": "Peajes — corredor sur",
+  "description": "Homologación de lectores y conciliación de tránsitos"
+}
+
+### ─────────────── caminos de error del alta ───────────────
+
+### Nombre en blanco → 400 con el campo señalado
+POST {{host}}/projects
+Content-Type: application/json
+
+{ "name": "   " }
+
+
+### Nombre duplicado ignorando mayúsculas y espacios → 409 PROJECT_NAME_TAKEN
+# El índice de la base es `lower(btrim(name))`, así que esto choca con el
+# proyecto creado arriba. El conflicto lo detecta PostgreSQL: no se consulta
+# antes de insertar, porque eso sería una condición de carrera.
+POST {{host}}/projects
+Content-Type: application/json
+
+{ "name": "  peajes — corredor sur  " }
+
+
+### ─────────────── detalle y edición ───────────────
+
+@projectId = {{crearProyecto.response.body.id}}
+
+### Detalle
+GET {{host}}/projects/{{projectId}}
+
+### Un id que no es UUID → 400, no 500
+GET {{host}}/projects/no-soy-un-uuid
+
+### Un UUID que no existe → 404
+GET {{host}}/projects/00000000-0000-4000-8000-000000000000
+
+### Actualización parcial
+# Lo ausente no se toca; un `null` explícito borra el campo.
+PATCH {{host}}/projects/{{projectId}}
+Content-Type: application/json
+
+{ "description": null }
+
+### Body vacío → 400
+PATCH {{host}}/projects/{{projectId}}
+Content-Type: application/json
+
+{}
+
+
+### ─────────────── tareas ───────────────
+
+### Crear una tarea en el proyecto
+# @name crearTarea
+POST {{host}}/projects/{{projectId}}/tasks
+Content-Type: application/json
+
+{
+  "title": "Homologar lectores del corredor sur",
+  "priority": "HIGH"
+}
+
+@taskId = {{crearTarea.response.body.id}}
+
+### Crear una tarea en un proyecto que no existe → 404, no una tarea huérfana
+POST {{host}}/projects/00000000-0000-4000-8000-000000000000/tasks
+Content-Type: application/json
+
+{ "title": "Huérfana" }
+
+
+### La API rechaza escribir `completedAt`: lo sella la base
+# Los esquemas son estrictos. Sin `.strict()`, Zod descartaría la clave en
+# silencio y el cliente creería que guardó esa fecha.
+PATCH {{host}}/tasks/{{taskId}}
+Content-Type: application/json
+
+{ "status": "DONE", "completedAt": "2020-01-01T00:00:00.000Z" }
+
+
+### Pasar a DONE — el trigger sella `completedAt` sin que nadie lo pase
+PATCH {{host}}/tasks/{{taskId}}
+Content-Type: application/json
+
+{ "status": "DONE" }
+
+### Editar sin tocar el estado: `completedAt` NO se mueve
+PATCH {{host}}/tasks/{{taskId}}
+Content-Type: application/json
+
+{ "title": "Homologar lectores — revisado" }
+
+### Salir de DONE: `completedAt` vuelve a null
+PATCH {{host}}/tasks/{{taskId}}
+Content-Type: application/json
+
+{ "status": "IN_PROGRESS" }
+
+
+### ─────────────── fecha de vencimiento (SL-17) ───────────────
+
+### Crear una tarea con fecha de vencimiento válida
+# @name crearTareaConVencimiento
+POST {{host}}/projects/{{projectId}}/tasks
+Content-Type: application/json
+
+{
+  "title": "Renovar certificados SSL de peajes",
+  "priority": "HIGH",
+  "dueDate": "2026-03-12"
+}
+
+@taskIdVencimiento = {{crearTareaConVencimiento.response.body.id}}
+
+### Editar la fecha de vencimiento de la tarea
+PATCH {{host}}/tasks/{{taskIdVencimiento}}
+Content-Type: application/json
+
+{
+  "dueDate": "2026-04-15"
+}
+
+### Limpiar la fecha de vencimiento (volver a null)
+PATCH {{host}}/tasks/{{taskIdVencimiento}}
+Content-Type: application/json
+
+{
+  "dueDate": null
+}
+
+### Formato de fecha inválido (DD-MM-YYYY) → 400 VALIDATION_ERROR
+# La API exige formato estricto ISO YYYY-MM-DD sin componente horario
+POST {{host}}/projects/{{projectId}}/tasks
+Content-Type: application/json
+
+{
+  "title": "Tarea con formato inválido",
+  "dueDate": "12-03-2026"
+}
+
+### Fecha inexistente en el calendario gregoriano → 400 VALIDATION_ERROR
+# Zod valida la existencia real del día en calendario (el 31 de febrero no existe)
+POST {{host}}/projects/{{projectId}}/tasks
+Content-Type: application/json
+
+{
+  "title": "Tarea con fecha inexistente",
+  "dueDate": "2026-02-31"
+}
+
+### Texto no convertible a fecha en PATCH → 400 VALIDATION_ERROR
+PATCH {{host}}/tasks/{{taskIdVencimiento}}
+Content-Type: application/json
+
+{
+  "dueDate": "mañana"
+}
+
+
+### ─────────────── filtros ───────────────
+
+### Por estado, repetible
+GET {{host}}/projects/{{projectId}}/tasks?status=TODO&status=IN_PROGRESS
+
+### Por prioridad, combinado con el estado
+GET {{host}}/projects/{{projectId}}/tasks?priority=HIGH&status=IN_PROGRESS
+
+### Búsqueda por título, insensible a mayúsculas
+GET {{host}}/projects/{{projectId}}/tasks?q=LECTORES
+
+### Un valor fuera del enum → 400. No se ignora en silencio: un filtro
+### ignorado devolvería resultados que el cliente cree filtrados.
+GET {{host}}/projects/{{projectId}}/tasks?status=BANANA
+
+### Un filtro vacío también es un error del cliente, no «todos»
+GET {{host}}/projects/{{projectId}}/tasks?status=
+
+
+### ─────────────── reordenación manual de tareas ───────────────
+
+### Crear una segunda tarea para tener vecinas con las que ordenar
+# @name crearTareaDos
+POST {{host}}/projects/{{projectId}}/tasks
+Content-Type: application/json
+
+{
+  "title": "Instalar antenas RFID"
+}
+
+@taskId2 = {{crearTareaDos.response.body.id}}
+@columnId = {{crearTareaDos.response.body.columnId}}
+
+
+### Crear una tercera tarea en la misma columna
+# @name crearTareaTres
+POST {{host}}/projects/{{projectId}}/tasks
+Content-Type: application/json
+
+{
+  "title": "Configurar balanceadores de carga"
+}
+
+@taskId3 = {{crearTareaTres.response.body.id}}
+
+
+### Crear una cuarta tarea para moverla entre vecinas
+# @name crearTareaCuatro
+POST {{host}}/projects/{{projectId}}/tasks
+Content-Type: application/json
+
+{
+  "title": "Calibrar sensores de paso"
+}
+
+@taskId4 = {{crearTareaCuatro.response.body.id}}
+
+
+### Reordenar entre dos vecinas: el servidor calcula el punto medio
+# El cliente no envía una posición numérica sino las vecinas entre las que
+# desea ubicar la tarjeta. La posición resultante es (prev + next) / 2.
+PATCH {{host}}/tasks/{{taskId4}}/reorder
+Content-Type: application/json
+
+{
+  "columnId": "{{columnId}}",
+  "previousTaskId": "{{taskId2}}",
+  "nextTaskId": "{{taskId3}}"
+}
+
+
+### Reordenar al principio: sin anterior, la nueva posición es la mitad de la siguiente
+# Con `previousTaskId: null`, el servidor ubica la tarea al inicio calculando
+# next / 2 sin necesidad de renumerar el resto de la columna.
+PATCH {{host}}/tasks/{{taskId3}}/reorder
+Content-Type: application/json
+
+{
+  "columnId": "{{columnId}}",
+  "previousTaskId": null,
+  "nextTaskId": "{{taskId2}}"
+}
+
+
+### Reordenar al final: con ambas vecinas nulas se ubica tras la última tarea
+# Ambas vecinas nulas es una petición legítima que sitúa la tarjeta al final
+# de la columna con MAX(position) + 1024 (o 1024 si la columna estuviese vacía).
+PATCH {{host}}/tasks/{{taskId3}}/reorder
+Content-Type: application/json
+
+{
+  "columnId": "{{columnId}}",
+  "previousTaskId": null,
+  "nextTaskId": null
+}
+
+
+### ─────────────── caminos de error de la reordenación ───────────────
+
+### Tarea como vecina de sí misma → 400 VALIDATION_ERROR
+# Una tarea no puede ser anterior ni siguiente de sí misma. El servidor
+# valida la coherencia relacional para impedir ciclos en la secuencia.
+PATCH {{host}}/tasks/{{taskId3}}/reorder
+Content-Type: application/json
+
+{
+  "columnId": "{{columnId}}",
+  "previousTaskId": "{{taskId3}}",
+  "nextTaskId": null
+}
+
+
+### ─────────────── etiquetas de color (SL-18) ───────────────
+
+### Listar etiquetas del proyecto (inicialmente vacío)
+GET {{host}}/projects/{{projectId}}/labels
+
+### Crear una etiqueta en el proyecto
+# @name crearEtiquetaUrgente
+POST {{host}}/projects/{{projectId}}/labels
+Content-Type: application/json
+
+{
+  "name": "Urgente",
+  "color": "red"
+}
+
+@labelIdUrgente = {{crearEtiquetaUrgente.response.body.id}}
+
+### Crear una segunda etiqueta
+# @name crearEtiquetaBackend
+POST {{host}}/projects/{{projectId}}/labels
+Content-Type: application/json
+
+{
+  "name": "Backend",
+  "color": "indigo"
+}
+
+@labelIdBackend = {{crearEtiquetaBackend.response.body.id}}
+
+### Nombre duplicado ignorando mayúsculas y espacios → 409 LABEL_NAME_TAKEN
+POST {{host}}/projects/{{projectId}}/labels
+Content-Type: application/json
+
+{
+  "name": "  urgente  ",
+  "color": "amber"
+}
+
+### Color no permitido (fuera de la paleta cerrada de 12) → 400 VALIDATION_ERROR
+POST {{host}}/projects/{{projectId}}/labels
+Content-Type: application/json
+
+{
+  "name": "Inválida",
+  "color": "magenta"
+}
+
+### Actualización parcial de una etiqueta (nombre o color)
+PATCH {{host}}/labels/{{labelIdUrgente}}
+Content-Type: application/json
+
+{
+  "name": "Muy Urgente",
+  "color": "orange"
+}
+
+### Renombrar etiqueta a un nombre ya existente en el proyecto → 409 LABEL_NAME_TAKEN
+PATCH {{host}}/labels/{{labelIdBackend}}
+Content-Type: application/json
+
+{
+  "name": "Muy Urgente"
+}
+
+### Asignar etiquetas a una tarea (reemplazo atómico vía PUT idempotente)
+PUT {{host}}/tasks/{{taskId}}/labels
+Content-Type: application/json
+
+{
+  "labelIds": ["{{labelIdUrgente}}", "{{labelIdBackend}}"]
+}
+
+### Filtrar tareas por una o más etiquetas (repetible)
+GET {{host}}/projects/{{projectId}}/tasks?labels={{labelIdUrgente}}&labels={{labelIdBackend}}
+
+### Intentar borrar una etiqueta asignada sin confirmación → 409 LABEL_HAS_TASKS
+DELETE {{host}}/labels/{{labelIdUrgente}}
+
+### Borrar etiqueta asignada confirmando eliminación en cascada de asignaciones → 204
+DELETE {{host}}/labels/{{labelIdUrgente}}?confirm=true
+
+### Borrar etiqueta libre de asignaciones → 204
+DELETE {{host}}/labels/{{labelIdBackend}}
+
+
+### ─────────────── LA decisión de diseño ───────────────
+
+### Borrar el proyecto con la tarea dentro → 409 PROJECT_HAS_TASKS
+# La restricción es `ON DELETE RESTRICT` y la impone PostgreSQL. No se
+# comprueba antes con un SELECT: entre esa consulta y el DELETE cabría un
+# INSERT de otra petición.
+DELETE {{host}}/projects/{{projectId}}
+
+### El proyecto sigue ahí: el 409 no destruyó nada
+GET {{host}}/projects/{{projectId}}
+
+### Mover la tarea a otro proyecto también libera el borrado
+# (crear antes un proyecto destino y sustituir el id)
+# PATCH {{host}}/tasks/{{taskId}}
+# Content-Type: application/json
+#
+# { "projectId": "<id-del-destino>" }
+
+### Borrar la tarea
+DELETE {{host}}/tasks/{{taskId}}
+
+### Borrar la segunda tarea
+DELETE {{host}}/tasks/{{taskId2}}
+
+### Borrar la tercera tarea
+DELETE {{host}}/tasks/{{taskId3}}
+
+### Borrar la cuarta tarea
+DELETE {{host}}/tasks/{{taskId4}}
+
+### Borrar la tarea con fecha de vencimiento
+DELETE {{host}}/tasks/{{taskIdVencimiento}}
+
+### Y ahora sí, el proyecto vacío se borra → 204
+DELETE {{host}}/projects/{{projectId}}
+
+### Confirmación: ya no existe → 404
+GET {{host}}/projects/{{projectId}}

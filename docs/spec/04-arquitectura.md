@@ -1,0 +1,950 @@
+# 04 — Arquitectura y decisiones
+
+## 1. Vista general
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  web/   React 18 + Vite + TypeScript + TanStack Query   │
+│                                                         │
+│  Validación de formularios  →  experiencia de usuario   │
+└───────────────────────────┬─────────────────────────────┘
+                            │  HTTP / JSON
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│  api/   Node + Express + TypeScript                     │
+│                                                         │
+│  routes       → HTTP, nada más                          │
+│  schemas      → Zod. FRONTERA DE CONFIANZA              │
+│  controllers  → traducción HTTP ↔ dominio               │
+│  services     → reglas de negocio, transacciones        │
+│  repositories → SQL parametrizado, mapeo de filas       │
+│  middleware   → errores, requestId, CORS                │
+└───────────────────────────┬─────────────────────────────┘
+                            │  pg (pool)
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│  PostgreSQL 16                                          │
+│                                                         │
+│  FK · NOT NULL · CHECK · ENUM · UNIQUE · índices        │
+│  INTEGRIDAD. La última palabra.                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+Las tres capas validan cosas distintas y esto es lo que se responde cuando pregunten "¿dónde validas?":
+
+| Capa | Qué valida | Si falla |
+|---|---|---|
+| React | Que el formulario esté completo antes de molestar al servidor | Mensaje inline, no se envía |
+| Express + Zod | Forma, tipo y rango del payload. **Es la frontera de confianza** | 400 `VALIDATION_ERROR` |
+| PostgreSQL | Integridad referencial e invariantes del dominio | `SQLSTATE` traducido a 409 / 404 / 400 |
+
+La frontend puede ser saltada con `curl`. La API no. La base tampoco.
+
+## 2. Estructura de carpetas
+
+```
+gopass-task-manager/
+│
+├── api/
+│   ├── src/
+│   │   ├── modules/
+│   │   │   ├── projects/
+│   │   │   │   ├── projects.routes.ts
+│   │   │   │   ├── projects.controller.ts
+│   │   │   │   ├── projects.repository.ts
+│   │   │   │   ├── projects.schema.ts
+│   │   │   │   └── projects.mapper.ts
+│   │   │   ├── tasks/           (misma forma)
+│   │   │   └── stats/
+│   │   ├── db/
+│   │   │   ├── pool.ts
+│   │   │   └── pg-error.ts       ← mapeo SQLSTATE → error de dominio
+│   │   ├── http/
+│   │   │   ├── errors.ts          ← AppError + catálogo de códigos
+│   │   │   ├── error-handler.ts   ← middleware central, RFC 7807
+│   │   │   ├── request-id.ts
+│   │   │   └── validate.ts        ← middleware genérico de Zod
+│   │   ├── config/env.ts          ← env validado con Zod al arrancar
+│   │   ├── app.ts
+│   │   └── server.ts
+│   ├── migrations/
+│   │   └── 0001_init.sql
+│   ├── seeds/seed.ts
+│   └── tests/
+│       ├── integration/           ← Supertest contra PostgreSQL real
+│       └── unit/                  ← solo lógica no trivial
+│
+├── web/
+│   ├── src/
+│   │   ├── features/
+│   │   │   ├── projects/          ← componentes + hooks de query
+│   │   │   ├── tasks/
+│   │   │   └── dashboard/
+│   │   ├── components/ui/         ← Button, Dialog, Badge, EmptyState…
+│   │   ├── lib/
+│   │   │   ├── api-client.ts      ← fetch tipado + parseo de problem+json
+│   │   │   └── query-client.ts
+│   │   ├── types/api.ts
+│   │   └── App.tsx
+│   └── tests/
+│
+├── docs/
+│   ├── decisions.md               ← ADRs (se promueve desde este documento)
+│   ├── data-model.md
+│   ├── api.md  +  openapi.yaml
+│   └── process/ai-assisted-development.md
+│
+├── .github/workflows/ci.yml
+├── docker-compose.yml
+├── quality-contract.yaml          ← sdlc adopt
+├── phase-contract.yaml            ← sdlc adopt
+├── .sdlc/config.json              ← sdlc adopt
+└── README.md
+```
+
+Dos carpetas de aplicación, sin Turborepo ni workspaces de pnpm. Un monorepo con herramientas de monorepo para dos paquetes es coste de configuración sin beneficio; se paga en depuración de symlinks lo que se pretendía ahorrar en scripts.
+
+### Por qué módulo por dominio y no capa por dominio
+
+La alternativa (`controllers/`, `services/`, `repositories/` en la raíz, con todos los dominios mezclados dentro) obliga a abrir tres carpetas para entender una funcionalidad. Con `modules/projects/` todo lo de proyectos está junto, y el día que un módulo crezca lo suficiente para extraerlo, se mueve una carpeta. Es la misma organización que usa un monolito modular real.
+
+## 3. Registro de decisiones (ADR)
+
+### ADR-001 — Monolito modular, no microservicios
+
+**Contexto.** Dos entidades, un consumidor, un despliegue.
+**Decisión.** Una sola aplicación de backend con módulos separados por dominio.
+**Consecuencia.** Se conserva la separación de responsabilidades sin pagar red, descubrimiento de servicios, consistencia eventual ni observabilidad distribuida.
+**Frase de defensa.** *"Distribuir el sistema habría añadido complejidad operativa sin resolver ningún problema real del dominio. Los módulos ya están separados; extraer uno el día que lo justifique un requisito de escala o de equipo es mover una carpeta."*
+
+### ADR-002 — `pg` con patrón repositorio, sin ORM
+
+**Contexto.** El enunciado exige PostgreSQL explícitamente. El dominio tiene dos tablas y menos de quince consultas.
+**Decisión.** Driver `pg` con consultas parametrizadas encapsuladas en repositorios. Migraciones con `node-pg-migrate`.
+**Alternativas.** Prisma acelera un CRUD grande y da tipos generados, pero introduce una capa de abstracción que hay que explicar y esconde justo lo que la prueba quiere ver. TypeORM encaja con NestJS, no con Express plano. Drizzle es una alternativa razonable, pero adoptar una herramienta nueva durante una prueba con plazo es riesgo sin retorno.
+**Consecuencia.** El SQL, las restricciones y los índices son visibles y auditables en el repositorio. El coste es escribir a mano el mapeo fila→objeto, que vive en un único `mapper` por módulo.
+**Frase de defensa.** *"Con dos entidades, un ORM añade una abstracción que hay que justificar y que oculta el SQL. El patrón repositorio me da el mismo aislamiento: si mañana el volumen justifica un ORM, entra detrás de esa interfaz sin tocar controladores ni servicios."*
+
+### ADR-003 — Borrar un proyecto con tareas devuelve 409, no cascada
+
+**Contexto.** Tres opciones: impedir (409), borrar en cascada, o desvincular (`project_id NULL`).
+**Decisión.** `ON DELETE RESTRICT` en la clave foránea y 409 `PROJECT_HAS_TASKS` en la API.
+**Alternativas.** La cascada destruye trabajo con un solo clic y sin intención explícita. Desvincular contradice el modelo: una tarea sin proyecto no tiene sentido en este dominio; obligaría a que `project_id` fuera nullable y a que toda la interfaz manejara "tareas huérfanas".
+**Consecuencia.** La interfaz debe explicar el conflicto, no mostrar un error genérico.
+**Frase de defensa.** *"Prefiero un borrado que falla de forma explicable a uno que destruye información en silencio. Si el negocio pidiera cascada, la habilitaría con confirmación explícita del usuario, no por defecto en el esquema."*
+
+### ADR-004 — La integridad se verifica en el motor, no en memoria
+
+**Contexto.** Comprobar "¿tiene tareas?" con un `SELECT` antes del `DELETE` deja una ventana entre ambas sentencias.
+**Decisión.** Se ejecuta la operación y se traduce el `SQLSTATE` que devuelve PostgreSQL.
+**Consecuencia.** Existe un módulo `db/pg-error.ts` que traduce los códigos identificables por sí solos (`23505`, `23514`, `22P02`, `23502`) leyendo el nombre de la restricción.
+**Matiz descubierto al medirlo.** `23503` **no** se traduce ahí. Se comprobó contra PostgreSQL 16 que borrar un proyecto con tareas e insertar una tarea con `project_id` inexistente producen los mismos `code`, `constraint`, `table`, `schema` y `routine`; solo difiere `detail`, texto en inglés del motor. Como esos dos casos deben responder 409 y 404, la desambiguación vive en cada repositorio, que sí sabe qué operación ejecutaba. `translatePgError()` devuelve `null` para `23503` a propósito, y una prueba unitaria fija esa decisión. Detalle en [08-verificacion-postgres.md](08-verificacion-postgres.md) §6.
+**Frase de defensa.** *"Validar en memoria lo que la base ya garantiza es una condición de carrera con pasos extra. La restricción es atómica; mi trabajo es traducir su error a un HTTP correcto."*
+
+### ADR-005 — TanStack Query como estado de servidor; sin Redux
+
+**Contexto.** Todo el estado relevante de esta aplicación vive en el servidor.
+**Decisión.** TanStack Query para consultas, mutaciones e invalidación. `useState` local para lo que es genuinamente de interfaz (modal abierto, filtro seleccionado).
+**Alternativas.** Redux introduce un almacén global para datos que ya tienen una fuente de verdad remota, y obliga a escribir a mano caché, reintentos y estados de carga. `useEffect` + `fetch` es la versión artesanal del mismo problema, con condiciones de carrera de regalo.
+**Consecuencia.** Tras cada mutación se invalida la query afectada. Sin actualizaciones optimistas: la interfaz nunca muestra un estado que la base rechazó.
+**Frase de defensa.** *"El estado de servidor y el estado de interfaz son problemas distintos. Meter datos remotos en Redux es reimplementar una caché que ya existe resuelta."*
+
+### ADR-006 — Tailwind CSS
+
+**Contexto.** El enunciado pide "visualizar la información de forma útil" y el evaluador ve la interfaz antes que el código.
+**Decisión.** Tailwind con una escala de color semántica propia para estados y prioridades.
+**Consecuencia.** El riesgo de Tailwind es que la interfaz parezca una plantilla. Se mitiga definiendo primero los tokens (color por estado, color por prioridad, espaciado) y componiendo componentes propios, no pegando utilidades sueltas por todo el árbol.
+
+### ADR-007 — El harness de calidad entra por `sdlc adopt`, no por `init`
+
+**Contexto.** El autor de este proyecto mantiene `sistema-multiagente-sdlc`, publicado en npm bajo licencia MIT. El modo `init --greenfield` instala 286 archivos de gobernanza.
+**Decisión.** Se usa `sdlc adopt`, que es puramente aditivo: `.sdlc/config.json`, `quality-contract.yaml`, `phase-contract.yaml`, `schemas/phase-evidence.schema.json` y una `devDependency`. Cuatro archivos.
+**Consecuencia.** El repositorio sigue siendo, ante todo, la aplicación. El contrato de calidad se ejecuta como un paso más de CI (`sdlc quality-gate --run`), no como una ceremonia paralela. Se descartaron `verdict` y `governance-check` tras ejecutarlos: ambos esperan artefactos que solo instala el harness completo. El razonamiento medido está en [05-estrategia-calidad.md](05-estrategia-calidad.md) §5.
+**Qué NO se hace.** No se instalan las fases F0–F17, ni los agentes, ni los espejos de skills, ni OpenSpec. Meter el andamiaje completo en una prueba de dos entidades sería exactamente el error que el enunciado castiga.
+**Se menciona en el README, en una línea.** No en la portada ni como argumento de seniority, sino en la sección de decisiones técnicas. Razón: `quality-contract.yaml`, `phase-contract.yaml`, `.sdlc/config.json` y el paso de quality gate en CI van a estar visibles en el repositorio de todas formas. Si el README no los explica, el evaluador ve artefactos sin contexto y la lectura por defecto es "plantilla copiada" o "sobrecarga sin justificar". Y como la entrega es por correo, puede no haber una entrevista donde aclararlo. Texto exacto:
+
+> `- **Proceso asistido por IA.** Se usó `sistema-multiagente-sdlc` (herramienta propia, MIT en npm) para los contratos de calidad y la verificación en CI. La aplicación no depende de él en tiempo de ejecución. Detalle en [docs/process/ai-assisted-development.md](../process/ai-assisted-development.md).`
+
+**Frase de defensa.** *"El framework aquí gobierna la evidencia, no la arquitectura de la aplicación. La aplicación no depende de él en tiempo de ejecución: si se quita la devDependency, el producto sigue funcionando igual."*
+
+### ADR-008 — Docker Compose como contrato de arranque
+
+**Contexto.** El evaluador va a ejecutar esto en una máquina que no controlamos.
+**Decisión.** `docker compose up --build` levanta PostgreSQL, espera a que esté sano, aplica migraciones, siembra datos y sirve API y web.
+**Detalles que no son opcionales.**
+- `healthcheck` con `pg_isready` en el servicio de base de datos, y `depends_on: { condition: service_healthy }` en la API. Sin esto, la API arranca antes que PostgreSQL y falla de forma intermitente.
+- PostgreSQL publicado en `5433:5432`. El 5432 del evaluador probablemente ya está ocupado.
+- Migraciones idempotentes ejecutadas en el arranque de la API, no en un paso manual del README.
+- Vite con `server.proxy` hacia la API para que la ruta `/api` funcione igual en desarrollo local y dentro de Compose, sin configurar CORS por ambiente ni exponer la URL del backend en el bundle.
+
+### ADR-009 — La base sella `completed_at`; el `CHECK` lo verifica
+
+**Contexto.** La invariante `status = 'DONE' ⟺ completed_at IS NOT NULL` está protegida por un `CHECK`, pero alguien tiene que escribir el valor.
+**Decisión.** Un trigger `BEFORE INSERT OR UPDATE OF status` en `tasks`. La aplicación nunca escribe `completed_at`.
+**Alternativas.** Sellarlo en el servicio deja fuera al seed, a `psql` y a cualquier migración de datos: esas escrituras violarían el `CHECK` y devolverían un 500 en vez de un dato correcto. Una columna generada no sirve: requiere una función `IMMUTABLE` y `now()` no lo es, además de que una generada no puede representar una transición.
+**Consecuencia.** El seed no menciona `completed_at` en ninguna parte y sus tareas `DONE` lo tienen. Es la demostración de que la invariante no depende de que la aplicación acierte.
+**Frase de defensa.** *"El `CHECK` verifica la invariante y el trigger la satisface. Separo las dos cosas: la primera es una garantía, la segunda es cómo se cumple. Puse ambas en el motor porque la API no es la única vía de escritura."*
+
+### ADR-010 — El `requestId` lo genera siempre el servidor
+
+**Contexto.** Hace falta correlacionar la respuesta que ve el cliente con la línea de log del servidor.
+**Decisión.** `crypto.randomUUID()` en un middleware, devuelto en la cabecera `X-Request-Id` de **todas** las respuestas y en el cuerpo de todo error. No se acepta un `X-Request-Id` entrante. No se usa `AsyncLocalStorage`.
+**Alternativas.** Aceptar el identificador del cliente permite encadenar trazas con un proxy por delante, pero aquí no hay ninguno poniéndolo, y reflejar una cabecera del cliente en la respuesta y en el log obliga a validar formato, longitud y caracteres de control para no permitir inyección de líneas en el log. `AsyncLocalStorage` evitaría pasar el identificador por parámetro, pero hoy solo lo necesita el manejador de errores, que ya tiene `req`.
+**Consecuencia.** Devolverlo también en las respuestas correctas, y no solo en los 500, permite investigar el caso en que un 200 devolvió algo inesperado.
+
+### ADR-011 — Sin capa de servicio mientras no tenga nada que hacer
+
+**Contexto.** La estructura prevista era `routes / controller / service / repository / schema / mapper` por módulo.
+**Decisión.** Al escribir el módulo de proyectos, el servicio quedaba vacío: no hay orquestación entre repositorios, ni transacción de varios pasos, ni regla de negocio que no esté ya en el esquema Zod o en el motor. Se eliminó. Quedan `routes` (HTTP y validación), `repository` (SQL y traducción de errores), `schema` y `mapper`.
+**Alternativas.** Mantenerlo por convención. Se descartó: una capa que solo reenvía la llamada se replica como norma y encarece cualquier cambio pequeño sin aportar aislamiento real.
+**Consecuencia.** Entrará en cuanto exista algo que orquestar —una operación que toque dos repositorios en una transacción, por ejemplo—. Añadirlo entonces es mover código; tenerlo vacío desde el principio es ceremonia.
+**Frase de defensa.** *"La especificación contemplaba un servicio. Al implementarlo no tenía nada que hacer, así que lo quité y lo dejé escrito. Prefiero borrar una capa vacía a defenderla en una entrevista."*
+
+### ADR-012 — El `PATCH` compone el `SET`, no usa `COALESCE`
+
+**Contexto.** `PATCH /api/projects/:id` acepta campos opcionales.
+**Decisión.** Se compone la lista de asignaciones a partir de las claves presentes, tomando el nombre de columna de un mapa constante del propio módulo.
+**Alternativas.** `SET name = COALESCE($2, name)` evita componer la sentencia, pero hace **imposible borrar una descripción ya escrita**: con `COALESCE`, `null` significa "no lo toques" y no queda forma de expresar "déjalo vacío". Leer, fundir en memoria y reescribir añade un viaje y una carrera entre ambos.
+**Consecuencia.** Un campo ausente significa "no lo cambies" y un `null` explícito significa "bórralo", que es la semántica que espera cualquiera que use un `PATCH`. El nombre de la columna nunca sale del payload, así que no hay superficie de inyección aunque el SQL se componga.
+
+### ADR-013 — Enrutado propio sobre la History API, sin librería
+
+**Contexto.** El detalle de un proyecto tiene que ser direccionable: debe sobrevivir a una recarga y poder compartirse. Un `useState` con el nombre de la pantalla no sirve.
+**Decisión.** Unas 35 líneas con `history.pushState`, un escuchador de `popstate` y `useSyncExternalStore`. Dos rutas: `/` y `/projects/:id`.
+**Alternativa medida.** Se instaló `react-router-dom` v7 y se midió su coste real en este bundle: **+38 KB sin comprimir, +13.4 KB gzip**, un 22 % más, para dos rutas. (De paso: la cifra de "~300 KB" que circula es falsa.)
+**Consecuencia.** No se pierde nada de lo que importa: los enlaces son `<a href>` reales, así que funcionan el botón de atrás, «abrir en pestaña nueva», el clic central y `Ctrl`/`Cmd`+clic; `preventDefault` solo se aplica al clic izquierdo sin modificadores. `nginx` y Vite ya tienen el fallback de SPA. Se usa `useSyncExternalStore` y no `useState` + `useEffect` porque es la forma que React 18 tiene de leer una fuente externa —`window.location`— sin desgarros en un render concurrente.
+**Cuándo entraría la librería.** Rutas anidadas, cargadores de datos por ruta, navegación con bloqueo o transiciones. Nada de eso existe aquí.
+**Frase de defensa.** *"Medí lo que costaba: 13 KB gzip para dos rutas. Con la History API son treinta líneas y el detalle sigue siendo una URL compartible. La librería entra cuando haya rutas anidadas o cargadores por ruta."*
+
+### ADR-014 — El `<dialog>` nativo en lugar de una librería de modales
+
+**Contexto.** Hacen falta modales para alta, edición y confirmación de borrado. Un modal accesible necesita trampa de foco, cierre con `Escape`, fondo inerte y devolución del foco al disparador.
+**Decisión.** El elemento nativo `<dialog>` con `showModal()`.
+**Alternativas.** `@radix-ui/react-dialog` es excelente, pero aquí no compra nada que el navegador no traiga ya. Un modal propio con `createPortal` costaría el triple y saldría peor.
+**Consecuencia.** Hay tres cosas que sí hay que añadir a mano, y están comentadas en el componente: sincronizar `open` con el ciclo de vida de React, cancelar el `Escape` nativo para que el cierre pase por `onClose` —si no, el diálogo se cierra y el estado de React sigue creyéndolo abierto—, y enfocar el primer campo. Esto último **no** funciona con el `autoFocus` de React: React lo aplica al montar el elemento, cuando el diálogo todavía no se ha mostrado, y `showModal()` vuelve a decidir el foco después. Se marca el destino con `data-autofocus` y se enfoca tras abrir.
+
+### ADR-015 — Esquemas de escritura estrictos
+
+**Contexto.** `completed_at` lo sella la base y la aplicación no lo escribe nunca. ¿Qué pasa si un cliente manda `{"status":"DONE","completedAt":"2020-01-01"}`?
+**Decisión.** `.strict()` en todos los esquemas de `POST` y `PATCH`: una clave desconocida devuelve 400 señalando el campo. No se aplica a `params` ni a `query`, donde las claves de más las pone el enrutador y no el cliente.
+**Alternativas.** El comportamiento por defecto de Zod es **descartar en silencio** las claves desconocidas, así que ese cliente recibiría un 200 y creería que guardó la fecha. Aceptar el campo y dejar que el trigger lo pise es aún peor: la respuesta contendría un valor distinto del enviado sin explicación.
+**Consecuencia.** Un cliente que mande campos de más se rompe. Es una rotura correcta y visible. De propina, atrapa las erratas: `{"staus":"DONE"}` deja de ser un parche vacío silencioso y pasa a ser un 400 que dice qué pasa.
+
+### ADR-016 — Listar tareas y comprobar el proyecto en una sola consulta
+
+**Contexto.** `GET /api/projects/<uuid-inexistente>/tasks` con la consulta directa devolvería `[]` con 200. Eso miente: el cliente creería que el proyecto existe y está vacío, y sería incoherente con el `POST`, que sí da 404.
+**Decisión.** Una sola sentencia anclada en `projects` con `LEFT JOIN tasks`, y **los filtros en la condición del `JOIN`, no en el `WHERE`**.
+**Por qué ahí y no en el `WHERE`.** En el `WHERE`, un filtro que no case ninguna tarea eliminaría también la fila del proyecto y un proyecto existente sin coincidencias se convertiría en un 404 falso. Verificado contra el motor.
+**Consecuencia.** La lectura queda atómica —sin el `SELECT` de comprobación seguido del listado, que serían dos viajes con una ventana entre ellos— y el repositorio distingue los tres casos por el número de filas: `0` → el proyecto no existe; `1` con `t.id` nulo → existe y no tiene tareas; `n` → sus tareas. Esa fila fantasma hay que filtrarla antes de mapear, o el endpoint devolvería un objeto con todos los campos en `null`.
+
+### ADR-017 — Reasignar una tarea a otro proyecto
+
+**Contexto.** El enunciado no lo pide. Pero el 409 de borrado dice que hay que eliminar o mover las tareas primero, y sin esta operación esa frase sería una promesa que la API no puede cumplir.
+**Decisión.** `projectId` entra en el `PATCH` de tarea. Cuesta una entrada en el mapa de columnas escribibles y una rama en el `catch`, y reutiliza la traducción del `23503` que ya existía.
+**Consecuencia.** El mismo código de PostgreSQL se traduce ahora en **tres** sitios distintos según la operación: al borrar un proyecto es 409 `PROJECT_HAS_TASKS`; al crear una tarea es 404 del proyecto padre; al mover una tarea es 404 del proyecto destino. Es la demostración más clara de por qué la desambiguación no puede vivir en un traductor genérico (ADR-004).
+**El texto de la interfaz se corrigió, no el revés.** El mensaje del diálogo dice ahora solo «elimínalas», porque la interfaz todavía no expone un control para mover. Prometerlo ahí mandaría al usuario a buscar un botón que no existe.
+
+### ADR-018 — Flechas de transición, no un desplegable de estado
+
+> **Revisado por ADR-020 y ADR-021.** El tamaño de estos botones se corrigió tras medirlo en un
+> móvil, y el arrastre acabó entrando cuando quedó claro que un retardo de activación lo separa del
+> gesto de desplazar. Las flechas no se sustituyeron: son la alternativa de un solo puntero que
+> exige WCAG 2.5.7, y lo que este ADR decidió sobre ellas sigue vigente.
+
+
+**Contexto.** El tablero necesita una forma de mover una tarjeta entre columnas. El drag & drop está descartado por coste y accesibilidad.
+**Decisión.** Dos botones de flecha en el pie de la tarjeta, habilitados solo para las transiciones válidas: `TODO` solo avanza, `DONE` solo retrocede, `IN_PROGRESS` va en ambos sentidos.
+**Alternativa.** Un `<select>` de estado en cada tarjeta. Se descarta porque **la columna ya dice cuál es el estado actual**: repetirlo en un desplegable es información redundante ocupando el ancho de una tarjeta estrecha. Lo que no es redundante es la *transición*, y eso es justo lo que comunica una flecha, en un solo clic y sin abrir nada encima.
+**Accesibilidad.** Son `<button>` nativos con `aria-label` que nombra la tarea y el destino («Mover "Homologar lectores TAG" a En curso»).
+**Detalle que nadie ve hasta que navega con teclado.** Al moverse, la tarjeta se desmonta de una columna y se monta en otra: el botón que tenía el foco desaparece y el foco caería al `body`. La tarjeta recién movida se enfoca a sí misma al montarse para que quien usa teclado no pierda el punto de referencia.
+
+### ADR-022 — Límite de trabajo en curso, impuesto por el motor y no por la interfaz
+
+> **Revisado por ADR-023.** El límite dejó de vivir en el proyecto y bajó a la columna al llegar
+> las columnas configurables: «Desarrollo» máximo 3 y «QA» máximo 2 es una política real que un
+> único límite por proyecto no puede expresar. Todo lo que este ADR decide sobre la concurrencia y
+> el bloqueo sigue vigente; solo cambia la fila que se bloquea.
+
+**Contexto.** El tablero tenía tres columnas y ninguna regla de flujo. Un tablero sin límite de
+trabajo en curso dibuja columnas pero no gestiona nada: el límite es la idea central del método
+kanban, y lo que hace visible el cuello de botella antes de que el trabajo se acumule.
+
+**Decisión.** `projects.wip_limit integer NULL`, aplicado **solo a `IN_PROGRESS`**, con la
+comprobación dentro de una transacción que bloquea la fila del proyecto con `FOR UPDATE`. Superarlo
+devuelve **409 `WIP_LIMIT_REACHED`** con el límite en el mensaje.
+
+**Por qué solo `IN_PROGRESS`.** En un tablero de tres columnas, «trabajo en curso» es literalmente
+esa columna: `TODO` es la cola de entrada y `DONE` el archivo, y limitarlos no significaría nada.
+Un límite por columna arbitraria sería vocabulario kanban sin su semántica.
+
+**Por qué `NULL` y no `0` como «sin límite».** Un proyecto recién creado no debe nacer bloqueado.
+`0` es expresable pero absurdo de imponer, así que lo rechazan a la vez el esquema Zod y un `CHECK`
+del motor.
+
+**Por qué `FOR UPDATE` y no un `SELECT count(*)`.** Es la condición de carrera clásica de
+comprobar-y-actuar. Sin el bloqueo, dos peticiones simultáneas leen «0 en curso», las dos concluyen
+que cabe una más y las dos entran. **Se reprodujo:** al quitar el `FOR UPDATE`, la prueba de
+concurrencia falla con `expected [ 200, 200 ] to deeply equal [ 200, 409 ]` y el tablero queda con
+dos tareas en curso bajo un límite de una. El bloqueo serializa por proyecto, que es el recurso en
+disputa; bloquear las filas de `tasks` dejaría fuera justo a la que está entrando.
+
+**La tarea que ya está dentro no se cuenta dos veces.** Sin esa exclusión, corregir una errata en el
+título de una tarea en curso con el tablero lleno devolvería 409, y el límite pasaría de regla a
+trampa.
+
+**Alternativa descartada: imponerlo en el cliente.** Deshabilitar el botón cuando la columna está
+llena es más barato y no es una regla: dos pestañas abiertas, o cualquier cliente de la API, se la
+saltan. Una invariante de negocio que solo vive en React no es una invariante. El botón se deja
+habilitado a propósito y el servidor responde 409, que es la señal que el método quiere producir.
+
+**Consecuencia.** La cabecera de «En curso» muestra `1/2` y pasa a rojo al alcanzarse. Poner un
+límite por debajo del uso actual **no expulsa tareas**: muestra el exceso y bloquea las entradas
+nuevas, que es lo que hace un tablero real cuando un equipo aprieta su límite.
+
+### ADR-023 — Columnas configurables sin renunciar a las garantías del ENUM
+
+**Contexto.** El tablero tenía tres columnas porque las columnas **eran** el `ENUM task_status`.
+De ese enum cuelgan cuatro garantías: el `CHECK` de `completed_at`, el trigger que lo sella, el
+`enum_range` con el que `/stats` asegura que un estado sin tareas salga con 0, y el límite de
+trabajo en curso. Permitir añadir y eliminar columnas obliga a decidir qué pasa con las cuatro.
+
+**Decisión.** Tabla `project_columns` con `category task_status NOT NULL`. El enum **no
+desaparece**: pasa a ser la categoría de ciclo de vida de cada columna, y varias columnas pueden
+compartirla. La unión se impone con una clave foránea compuesta:
+
+```sql
+FOREIGN KEY (column_id, status) REFERENCES project_columns (id, category)
+```
+
+**Verificado contra PostgreSQL** que el motor rechaza las dos formas de divergencia —mover a una
+columna terminal sin cambiar el estado, y cambiar el estado sin mover de columna— y solo acepta el
+cambio atómico de ambos. Sin ella, `status` y `column_id` serían dos fuentes de verdad que
+acabarían divergiendo: una tarea marcada como completada colgando de «En curso».
+
+**Alternativa descartada: eliminar el enum y sustituirlo por `is_terminal boolean`.** Es lo que
+proponía una de las dos revisiones, con el argumento de que clasificar «En revisión» o «Bloqueada»
+en tres categorías globales es artificial. Se descartó por dos evidencias:
+
+| | Archivos a tocar | Reversible |
+|---|---|---|
+| Eliminar el enum | **16** | la migración de retirada, **no** |
+| Conservarlo como categoría | **9** | sí, comprobado |
+
+Y porque el argumento es falso: **es el modelo de Jira**, donde cada estado personalizado declara
+una de exactamente tres categorías —To Do, In Progress, Done— y Atlassian se niega por diseño a
+permitir más. La categoría es justamente lo que hace posible informar entre proyectos con tableros
+distintos, que es lo que aquí protege a `/stats`.
+
+**Dos triggers, por la misma razón que el de `completed_at`.** Una regla que solo viva en el
+servicio deja fuera al seed, a `psql` y a cualquier otro cliente:
+
+- `projects_create_default_columns` — todo proyecto nace con sus tres columnas. Un proyecto sin
+  columnas no es un tablero vacío sino uno roto, donde no se puede crear ni una tarea.
+- `tasks_set_column_from_status` — una tarea insertada sin columna se coloca en la primera de su
+  categoría. Gracias a él, `INSERT INTO tasks (project_id, title, status)` sigue funcionando igual
+  que antes, y las 85 pruebas que ya existían no necesitaron reescribirse.
+
+**La categoría no se puede cambiar después de crear la columna.** Cambiarla exigiría mover a la vez
+el `status` de todas sus tareas —la clave foránea compuesta las mantiene unidas—, y hacerlo en
+silencio sellaría o borraría fechas de completado por efecto colateral.
+
+**Borrar una columna sigue el precedente de ADR-003.** Sin destino explícito, `409
+COLUMN_HAS_TASKS` con el recuento; con `?reassignTo=`, mover y borrar ocurren en la misma
+transacción y se respeta el límite del destino. Y no se puede eliminar la última columna de una
+categoría: sin `DONE` no habría forma de dar nada por terminado.
+
+**Consecuencia.** Las flechas de la tarjeta pasan a ser contiguas **por posición** y siguen
+cumpliendo WCAG 2.5.7 con N columnas —se llega a cualquiera paso a paso—; el salto directo va por
+el desplegable del diálogo. La rejilla pasa a `grid-flow-col` con `auto-cols-[minmax(16rem,1fr)]`,
+porque `grid-cols-3` colapsaba al añadir la cuarta.
+
+### ADR-024 — El orden de las tareas es configuración de la columna, no del navegador
+
+**Contexto.** Cada etapa se lee con una pregunta distinta: en la cola de entrada interesa qué tomar
+a continuación; en el trabajo en curso, qué lleva más tiempo atascado; en el archivo, lo recién
+terminado. Un criterio único para todo el tablero obliga a un compromiso en las tres.
+
+**Decisión.** `project_columns.sort`, un `ENUM column_sort` con cuatro criterios. Es configuración
+compartida del tablero, no preferencia de quien mira.
+
+**Por qué no `localStorage`.** Es lo que proponía una de las dos revisiones. No se comparte por
+enlace, no sobrevive a cambiar de equipo o navegador, y contradice ADR-019, que fijó que el estado
+del tablero vive en un sitio compartible. Las columnas ya son configuración del equipo; su orden
+también lo es.
+
+**Por qué no un único selector para todo el tablero, en la URL.** Es lo que proponía la otra
+revisión, con el argumento de que un orden por columna exigiría N consultas o penalizar la caché.
+**Se midió y es falso:** una sola consulta sirve un orden distinto por columna mediante una escalera
+de `CASE` sobre `pc.sort`, donde cada rama devuelve NULL salvo la del criterio activo.
+
+```sql
+ORDER BY pc.position,
+  CASE pc.sort WHEN 'priority_asc'  THEN t.priority   END ASC,
+  CASE pc.sort WHEN 'priority_desc' THEN t.priority   END DESC,
+  CASE pc.sort WHEN 'created_asc'   THEN t.created_at END ASC,
+  CASE pc.sort WHEN 'created_desc'  THEN t.created_at END DESC,
+  t.created_at DESC, t.id
+```
+
+Comprobado con tres columnas y tres criterios distintos en una sola pasada. El desempate final
+mantiene el orden estable cuando el criterio elegido empata, para que dos cargas seguidas no
+intercambien tarjetas.
+
+**No se ofrece orden alfabético.** No responde a ninguna decisión de trabajo —nadie elige qué hacer
+por la letra inicial— y solo añadiría relleno al selector.
+
+### ADR-005 (matiz) — Escribir la respuesta confirmada en la caché no es optimismo
+
+**Contexto.** Sin actualizaciones optimistas, cambiar el estado de una tarjeta dispara `PATCH` → invalidación → refetch, y la tarjeta se queda quieta durante ese viaje.
+**Matiz.** ADR-005 prohíbe pintar un estado **antes** de que la base lo confirme; eso sigue en pie y no hay `onMutate` ni rollback en ninguna parte. Lo que sí se hace es que, en `onSuccess`, cuando PostgreSQL **ya respondió 200 con la tarea actualizada**, esa respuesta se escribe en la caché con `setQueryData`. No es optimismo: es aplicar el dato confirmado sin pagar un segundo viaje.
+**Y se invalida igual.** Si el parche cambió la prioridad y hay un filtro por prioridad activo, la lista escrita a mano podría contener una tarea que ya no casa; la invalidación posterior lo corrige en segundo plano sin que el usuario vea el hueco.
+
+### ADR-019 — Filtros en la URL, y ninguno por estado
+
+**Contexto.** RF-13 está implementado y probado en la API. Falta decidir cómo se expone.
+**Decisión.** Búsqueda por texto y filtro por prioridad, ambos **en la URL** con `replaceState`. **No hay filtro por estado.**
+**Por qué no el de estado.** Las tres columnas *son* la dimensión de estado. Filtrar por `DONE` dejaría dos columnas vacías: el tablero parecería roto, no filtrado.
+**Por qué en la URL.** Un tablero filtrado se puede compartir por enlace y sobrevive a una recarga. El coste fue mínimo porque el router propio ya usa `useSyncExternalStore`: bastó con incluir `location.search` en la instantánea. Se usa `replaceState` y no `pushState` para que teclear en el buscador no llene el historial.
+**Consecuencia.** Los filtros se aplican en SQL, no sobre un array ya descargado, y una columna sin coincidencias distingue «Sin tareas que coincidan» de «Sin tareas».
+
+### ADR-020 — Objetivos táctiles de 44 px, y el conflicto del arrastre con el carrusel
+
+> **Revisado por ADR-021.** El arrastre acabó entrando. Lo que este ADR mide sobre el conflicto
+> con el carrusel sigue siendo cierto; lo que le faltaba era que un retardo de activación separa los
+> dos gestos. Los objetivos de 44 px se mantienen y son ahora la alternativa que exige WCAG 2.5.7.
+
+**Contexto.** Al revisar la aplicación en un móvil apareció una fricción real: los controles de la
+tarjeta —editar, borrar y las dos flechas de transición— miden **28×32 px**. Cumplen el mínimo de
+**WCAG 2.2 SC 2.5.8** (24×24, nivel AA) pero no la recomendación de **SC 2.5.5** ni la de Apple
+(44×44), y con el pulgar se fallan. La reacción intuitiva es pedir arrastre de tarjetas.
+
+**Decisión.** Elevar el objetivo táctil a **44×44 px solo donde el puntero es grueso**
+(`pointer-coarse`), añadir `touch-manipulation` para eliminar el retardo de ~300 ms del doble toque,
+y dar respuesta inmediata al toque con `active:scale`. En ratón los controles siguen en 28×32: la
+densidad de la interfaz en escritorio no es un problema que haya que resolver.
+
+Medido después del cambio, sobre los 18 controles del tablero en un viewport de 375 px: **18 de 18
+alcanzan 44×44**, frente a 0 de 18 antes. En puntero fino siguen en 28×32.
+
+**El arrastre se mantiene descartado, y ahora hay una razón medida además de la de coste.** Por
+debajo de `lg` el tablero es un carrusel horizontal con `scroll-snap-type: x mandatory`: en un móvil
+de 375 px mide 955 px de ancho. **El gesto de arrastrar una tarjeta hacia otra columna es
+exactamente el gesto de desplazar el carrusel**, y para soltarla hay que desplazar mientras se
+arrastra. No es un detalle de implementación: es un conflicto entre dos gestos que ocupan el mismo
+movimiento del dedo, y la salida habitual —un `delay` de activación y desactivar el anclaje durante
+el arrastre— compra el arrastre a cambio de que el carrusel deje de responder como espera el
+sistema operativo.
+
+**Y aunque entrara, no sustituiría a las flechas.** **WCAG 2.2 SC 2.5.7 (Dragging Movements**,
+nivel AA) exige que toda funcionalidad que dependa de arrastrar tenga una alternativa de un solo
+puntero. Las flechas son esa alternativa. El arrastre sería una capa opcional encima, no un
+reemplazo, y con él habría que sostener dos caminos de mutación en lugar de uno.
+
+**Alternativas descartadas.** Deslizar la tarjeta compite con el mismo scroll horizontal. Una
+pulsación larga es poco descubrible y añade el mismo conflicto. Un menú «Mover a…» de dos toques
+funciona, pero duplica lo que la flecha ya hace en uno.
+
+**Relación con ADR-018.** No lo sustituye: lo confirma con evidencia que en su momento no se tenía.
+ADR-018 descartó el arrastre por coste y accesibilidad; esta revisión mide el coste ergonómico real
+de su alternativa y lo corrige, sin cambiar la decisión de fondo.
+
+### ADR-021 — Arrastre de tarjetas, encima de las flechas y no en su lugar
+
+**Contexto.** ADR-018 descartó el arrastre por coste y accesibilidad, y ADR-020 lo confirmó al medir
+el conflicto con el carrusel. Ambos siguen siendo ciertos en lo que afirman. Lo que ninguno de los
+dos evaluó es que **mantener pulsado y deslizar son gestos distinguibles**: un retardo de activación
+los separa, que es como lo resuelven los tableros que sí lo tienen. Con esa pieza, el conflicto deja
+de ser estructural y pasa a ser un parámetro.
+
+**Decisión.** `@dnd-kit/core`, sin `@dnd-kit/sortable`: una tarjeta cambia de columna, no se ordena
+dentro de ella, así que el paquete de ordenación solo añadiría superficie de error.
+
+| | |
+|---|---|
+| Ratón | `MouseSensor`, activación por **distancia de 6 px** |
+| Táctil | `TouchSensor`, activación por **250 ms** con tolerancia de 8 px |
+| Teclado | **sin `KeyboardSensor`** |
+
+El retardo es lo que separa los dos gestos: un deslizamiento rápido sigue desplazando el carrusel, y
+solo la pulsación mantenida levanta la tarjeta. La tolerancia cancela la activación si el dedo se
+mueve antes de cumplirse el tiempo, devolviendo el gesto al scroll nativo.
+
+No se registra `KeyboardSensor` a propósito: interceptaría Espacio, Enter y las flechas de
+dirección, que son justo las teclas de los botones que viven dentro de la tarjeta. La vía de teclado
+son esos botones.
+
+**Las flechas se quedan, y no es una cortesía.** **WCAG 2.2 SC 2.5.7 (Dragging Movements**, nivel
+AA) exige que toda funcionalidad que dependa de arrastrar tenga una alternativa de un solo puntero.
+El arrastre es una capa encima; las flechas son el camino garantizado.
+
+**El anclaje se apaga mientras se arrastra.** `scroll-snap-type: mandatory` se resuelve en el hilo
+del compositor: si sigue activo mientras el autoscroll desplaza el carrusel, el navegador tira de
+vuelta hacia la columna centrada y la tarjeta salta. El contenedor alterna a `snap-none` durante el
+arrastre y lo recupera al soltar.
+
+**Arrastrar permite cualquier columna; las flechas, solo la contigua.** No es una incoherencia: las
+flechas son contiguas porque en una tarjeta estrecha caben dos botones, no tres, y el dominio no
+prohíbe pasar de `TODO` a `DONE`. Obligar a dos arrastres para llegar a «Completada» sería una
+limitación de la interfaz disfrazada de regla de negocio.
+
+**Soltar fuera devuelve la tarjeta a su sitio** con la animación de vuelta del `DragOverlay`, sin
+disparar ninguna petición. El clon se pinta en un portal porque dentro del carrusel el
+`overflow-x: auto` lo recortaría al salir de la columna.
+
+**El foco depende del origen del movimiento.** Con las flechas se conserva lo de ADR-018: el botón
+pulsado se desmonta y la tarjeta se enfoca a sí misma. Con el arrastre no se enfoca nada: el puntero
+no ha perdido su referencia y forzar el foco pintaría un anillo que nadie pidió.
+
+**Coste medido.** El bundle pasa de **68,40 kB a 84,26 kB gzip: +15,86 kB**. Es más de lo que costaba
+`react-router` (+13,4 kB), que sí se descartó, pero aquel resolvía dos rutas que ya funcionaban con
+sesenta líneas propias; este entrega una interacción que no existía.
+
+**Lo que NO se hizo.** Zonas de destino fijas flotando sobre el tablero: restan altura en una
+pantalla de 375 px y añaden una segunda representación del flujo que ya comunican las columnas.
+
+**Relación con ADR-005.** El proyecto evita el optimismo artificial y la caché contiene solo lo que
+PostgreSQL confirmó. Eso **no cambia**. Al soltar, la tarjeta se queda en la columna destino mediante
+una **proyección de presentación** —un estado local que dice «esta tarjeta se está moviendo allí»—,
+no escribiendo una predicción en la caché. Al no haber predicción, el error no necesita rollback:
+se retira la proyección y la tarjeta reaparece donde el servidor dice que está.
+
+### ADR-025 — Orden manual con posición fraccionaria y restricción única
+
+**Contexto.** Con la llegada del arrastre de tareas dentro de una misma columna (SL-15), el usuario
+puede reordenar manualmente la posición de cualquier tarjeta. El modelo ingenuo de enteros continuos
+obliga a renumerar la lista entera en cada movimiento, convirtiendo un gesto local en escrituras
+proporcionales al tamaño de la columna.
+
+**Decisión.** `tasks.position` con tipo `double precision` (migración `0006_tasks_position.sql`),
+junto a la restricción `CONSTRAINT tasks_position_unica UNIQUE (column_id, position)` y cálculo
+de punto medio en el servidor (`PATCH /api/tasks/:id/reorder`):
+
+- Al mover una tarjeta entre dos existentes con posiciones $a$ y $b$, el servidor calcula $(a + b) / 2.0$ en $O(1)$.
+- Al mover al principio de la columna, asigna $b / 2.0$.
+- Al mover al final, asigna $\max(position) + 1024.0$.
+
+**Mediciones contra PostgreSQL 16 (reales, no estimadas):**
+
+| Escenario | Aguante de `double precision` | Modo de fallo |
+|---|---|---|
+| Arrastrar siempre al final (`p + 1024`) | ilimitado | ninguno |
+| Arrastrar siempre al principio (`p / 2`) | **1 084** divisiones | `SQLSTATE 22003`, ruidoso |
+| Insertar siempre en el mismo hueco `(a+b)/2` | **52** | **silencioso**: el punto medio colapsa contra el extremo |
+| Lo mismo con `numeric` | **67**, no ilimitado | igual de silencioso |
+
+**`numeric` no es la escapatoria.** La división de PostgreSQL sobre `numeric` trunca a una escala
+calculada por el motor, por lo que solo compra 15 huecos más (67 frente a 52). Es un dato
+contraintuitivo: se asume comúnmente que `numeric` proporciona precisión infinita, pero la división
+sucesiva trunca y colapsa de forma igualmente silenciosa con mayor sobrecoste de almacenamiento y CPU.
+
+**El fallo peligroso es el de 52, no el de 1 084**, porque es silencioso. Al dividir 53 veces
+consecutivas entre dos posiciones fijas, la mantisa de 53 bits de IEEE 754 colapsa numéricamente contra
+uno de los extremos (`(a + b) / 2 === a` o `b`). Sin salvaguarda, se asignarían dos posiciones idénticas
+en silencio.
+
+**La restricción única convierte el colapso silencioso en `SQLSTATE 23505`.** Medido contra PostgreSQL 16:
+la inserción número 53 es rechazada por `tasks_position_unica`, manteniendo 54 filas intactas con 54
+posiciones rigurosamente distintas.
+
+**Mismo patrón que `projects_name_unique_ci`.** En lugar de consultar antes de insertar (lo cual
+introduciría una condición de carrera), se captura el error del motor: ante un `23505` (colapso por
+precisión o colisión concurrente) o `22003` (desbordamiento tras 1 084 divisiones al principio), la
+transacción revierte al `SAVEPOINT`, rebalancea la columna en dos pasos con
+`ROW_NUMBER() OVER (...) * 1024.0` y reintenta la asignación una única vez.
+
+**La concurrencia queda resuelta por la restricción, no por bloqueos pesados.** Dos usuarios que
+arrastren simultáneamente calculando el mismo punto medio no generan posiciones duplicadas; el segundo
+obtiene un `23505` y su transacción resuelve la colisión mediante el rebalanceo automático. Sin la
+restricción única, «la última escritura gana» corrompería el orden duplicando posiciones sin aviso.
+
+**Alternativas descartadas:**
+
+1. **Entero con reindexado completo.** Es lo que implementa `sanidhyy/trello-clone` (13★, MIT,
+   `actions/update-card-order/index.ts`): el cliente manda todas las tarjetas y el servidor emite
+   N `UPDATE` en una transacción. Mover una tarjeta al principio de una lista de 50 tarjetas genera
+   **50 `UPDATE`**. Convierte un gesto local en escrituras proporcionales al tamaño de la lista y
+   multiplica la contención de bloqueos.
+2. **Entero con hueco y reindexado al agotarse.** Misma familia de soluciones; exige una lógica de
+   rebalanceo idéntica pero añade mayor complejidad en el cálculo de huecos enteros sin la elegancia
+   matemática del punto medio fraccionario.
+3. **LexoRank / claves de orden textuales.** Es la técnica empleada por Jira. Resuelve el agotamiento
+   mediante cadenas en base 36 con división léxica, pero exige incorporar o programar una biblioteca
+   compleja para un problema que la restricción única en la base ya vuelve completamente detectable y
+   reparable. **Ningún referente investigado lo usa**: `usekaneo/kaneo` (8 967★) también recurre a entero
+   llano (`position: integer("position").default(0)` en `apps/api/src/database/schema.ts`), y de hecho
+   reordena con un `forEach` que dispara **una petición HTTP independiente por tarjeta** —hasta 100
+   peticiones al mover entre dos columnas de 50, sin transacción—.
+
+**Convivencia con ADR-024.** Dos revisores independientes señalaron el riesgo de interacción: el
+orden manual convive con los órdenes automáticos (`priority_asc`, `created_desc`, etc.). Para evitar
+romperlos, `manual` es **estrictamente una rama más de la escalera de `CASE`**, nunca un desempate global:
+
+```sql
+ORDER BY pc.position,
+  CASE pc.sort WHEN 'manual'        THEN t.position   END ASC,
+  CASE pc.sort WHEN 'priority_asc'  THEN t.priority   END ASC,
+  CASE pc.sort WHEN 'priority_desc' THEN t.priority   END DESC,
+  CASE pc.sort WHEN 'created_asc'   THEN t.created_at END ASC,
+  CASE pc.sort WHEN 'created_desc'  THEN t.created_at END DESC,
+  t.created_at DESC, t.id
+```
+
+Si `t.position` se evaluara fuera del `CASE`, una columna ordenada por prioridad alteraría su secuencia
+cuando las tareas tuviesen posiciones asignadas. La prueba 2 de `api/tests/integration/tasks.test.ts`
+blinda esta garantía y se verificó rompiéndola intencionadamente.
+
+**Decisión de producto.** En columnas con orden automático (por fecha o prioridad), **el arrastre
+para reordenar queda deshabilitado en la interfaz y muestra un aviso visible**. Arrastrar una tarjeta
+no altera la configuración de la columna a escondidas; cambiar el criterio de orden es un acto deliberado
+que el usuario realiza desde el selector de la cabecera.
+
+---
+
+### ADR-026 — Cada migración en su propia transacción
+
+**Contexto.** Por defecto, `node-pg-migrate` envuelve **todas las migraciones pendientes en una única
+transacción global**. Al añadir la migración `0006_tasks_position.sql` (que incorpora el valor `'manual'`
+al enum `column_sort` mediante `ALTER TYPE ... ADD VALUE`) y la migración `0007_columnas_orden_manual_por_defecto.sql`
+(que usa ese valor en `ALTER TABLE project_columns ALTER COLUMN sort SET DEFAULT 'manual'`), ejecutar
+las migraciones sobre una base limpia fallaba inmediatamente con:
+
+```
+SQLSTATE 55P04: unsafe use of new value "manual" of enum type column_sort
+HINT: New enum values must be committed before they can be used.
+```
+
+Partir la lógica en dos archivos de migración **no bastaba**: al compartirse la transacción, PostgreSQL
+rechaza utilizar un valor de enum que no ha sido confirmado (`COMMITTED`) previamente en una transacción
+anterior.
+
+**Decisión.** Añadir el flag `--no-single-transaction` en `api/docker-entrypoint.sh` y en los scripts
+`migrate` y `migrate:down` de `api/package.json`. Con este parámetro, cada archivo de migración se ejecuta
+dentro de su propia transacción aislada, permitiendo que la transacción de la `0006` confirme el nuevo
+valor del ENUM en el catálogo antes de que la `0007` lo aplique como `DEFAULT`.
+
+**Coste aceptado.** Si una tanda de varias migraciones falla a mitad de camino, las migraciones previas
+permanecen aplicadas en la base de datos, dejando el esquema en un estado intermedio en vez de revertir
+todo el lote. Este comportamiento se acepta porque:
+1. Es el estándar de la industria adoptado por la mayoría de motores de migración (Flyway, Liquibase,
+   Prisma, Rails).
+2. Cada archivo de migración en este repositorio ya es atómico en sí mismo, aprovechando el soporte de
+   DDL transaccional de PostgreSQL.
+
+**Alternativa descartada.** No modificar el valor por defecto en el esquema de PostgreSQL y delegarlo
+exclusivamente al servicio de la aplicación (mediante un `COALESCE` en `createColumn`). Se descartó
+porque viola el principio fundacional que sustenta los triggers del repositorio (ADR-004 y ADR-009):
+**una regla que solo vive en la aplicación deja fuera al seed y a `psql`**. La base de datos es la fuente
+suprema de verdad; si una columna nueva debe nacer con orden manual, el valor por defecto debe estar
+sellado en el esquema de la tabla.
+
+---
+
+### ADR-027 — Completar una tarea moviéndola, no con un campo aparte
+
+**Contexto.** Trello marca una tarjeta como «completada» mediante un campo de la propia tarjeta **independiente de la lista**: se pasa el ratón por encima, se pulsa el círculo, se pone verde, y la tarjeta **no se mueve** (fuente: [Atlassian Support — Add and customize cards and lists](https://support.atlassian.com/trello/docs/add-and-customize-cards-and-lists/)).
+
+El modelo de datos de este proyecto hace lo contrario y por diseño fundacional:
+1. La restricción `CHECK` de `tasks` liga estrictamente `status = 'DONE'` con `completed_at IS NOT NULL`.
+2. El trigger `tasks_set_completed_at` (migración `0001_initial_schema.sql`) lo sella automáticamente solo en la transición hacia `DONE` (y lo limpia a `NULL` al salir).
+3. La clave foránea compuesta `(column_id, status) REFERENCES project_columns (id, category)` impide físicamente que la columna y el estado diverjan.
+
+En este diseño, «completada» y «está en una columna de categoría DONE» son rigurosamente la misma proposición.
+
+**Decisión.** El control de completado mueve la tarea a una columna de categoría `DONE`. Si el proyecto cuenta con más de una columna `DONE`, se despliega un menú accesible para que el usuario elija el destino; **nunca se elige «la primera»**, que constituiría una regla opaca no visible para el usuario.
+
+**Medición que lo decidió.** Desacoplar «completada» en un booleano independiente (`is_completed`) requería modificar los **cuatro** puntos neurálgicos que hoy derivan el estado de completitud de `status = 'DONE'`:
+1. El cálculo `COUNT(...) FILTER (WHERE status = 'DONE')` del avance de proyecto en `projects.repository.ts` (`api/src/modules/projects/projects.repository.ts`).
+2. El `COUNT` de tareas completadas en el endpoint `/api/stats` (`api/src/modules/stats/stats.routes.ts`).
+3. El trigger de integridad `tasks_set_completed_at` de la migración `0001` (`api/migrations/0001_initial_schema.sql`).
+4. El renderizado y tachado visual en `TaskCard` (`web/src/features/tasks/TaskCard.tsx`).
+Adicionalmente, obligaba a actualizar el contrato de la API (`03-contrato-api.md`), la especificación OpenAPI en Swagger (`api/src/docs/swagger.ts`), y todas las suites de integración.
+
+En contraste, mover la tarea **no toca el backend en absoluto**: SL-16 se implementó con dos archivos modificados exclusivamente en el frontend (`web/src/features/tasks/TaskCard.tsx` y `web/src/features/tasks/TaskBoard.tsx`) y cero cambios en `api/`.
+
+**Argumento de coherencia de flujo.** Con un campo independiente, una tarjeta marcada como completada dentro de una columna intermedia («En curso») **seguiría consumiendo el límite de trabajo en curso (WIP)** de dicha columna. Permitir tareas completadas que ocupan cupo en una fase activa es conceptualmente incoherente con el significado del límite de WIP (ADR-022).
+
+**Semántica accesible.** El control no es un `role="checkbox"` ni utiliza `aria-pressed`; es un `<button>` convencional (`<button type="button">`). La acción traslada la tarjeta a otro contenedor en el DOM y en el tablero en lugar de conmutar una propiedad booleana local; prometer una casilla de verificación a un usuario de lector de pantalla comunicaría erróneamente lo que sucede.
+Cuando existen múltiples destinos:
+- El botón disparador declara `aria-haspopup="menu"` y `aria-expanded`.
+- Al abrir el menú, el foco viaja automáticamente al primer destino seleccionable.
+- La tecla `Escape` cierra el menú sin mover la tarea y devuelve el foco inmediatamente al disparador.
+- La interacción completa se verificó en navegador y está blindada por pruebas de componentes y E2E.
+
+**Precedente contrario, para que conste.** `usekaneo/kaneo` (8 967 estrellas) resuelve la ambigüedad de destino recurriendo a una cascada automática en backend: `requestedColumn ?? matchingCurrentColumn ?? firstColumn` (`apps/api/src/task/controllers/move-task.ts`). La prueba 2 de `completar-tarea.test.tsx` se validó introduciendo intencionadamente dicho antipatrón para confirmar que la aplicación exige la elección explícita del usuario y no mueve a la primera columna en silencio.
+
+**Alternativas descartadas:**
+1. **Campo `is_completed` independiente (estilo Trello).** Descartada por romper la invariante relacional con las columnas, exigir refactorizar 4 subsistemas del backend y corromper el cálculo del WIP limit.
+2. **Un botón que también desmarque la tarea en el mismo control.** Descartada porque **el camino de vuelta ya existía y cuesta un solo clic**: una tarjeta situada en una columna terminal (`DONE`) conserva el botón de flecha que la mueve a la columna contigua anterior, con su etiqueta accesible indicando exactamente a cuál. Un menú de reapertura requeriría dos clics más gestión de foco para duplicar una capacidad preexistente. Por ello, en una tarea completada el círculo pasa a ser **un indicador visual y accesible de estado y no un botón**: un control pulsable que no realiza ninguna acción sería peor que un indicador honesto.
+
+---
+
+### ADR-028 — La fecha de vencimiento es `date`, y el semáforo se calcula en el cliente
+
+**Contexto.** Medición real tomada en la máquina de desarrollo:
+```
+contenedor db  → timezone UTC,  current_date 2026-09-06
+contenedor api → UTC
+equipo         → America/Bogota, GMT-0500
+```
+Entre las 19:00 y las 23:59 de Bogotá (cinco horas al día), el contenedor se encuentra en la fecha del día siguiente mientras el usuario continúa en el día actual.
+
+**Decisión 1: `due_date date`, sin hora.** Con `timestamptz`, una fecha «vence el 12 de marzo» almacenada como medianoche UTC (`2026-03-12T00:00:00Z`) se proyecta en Bogotá como **el 11 de marzo a las 19:00**: la tarjeta cambiaría de día en el tablero según el huso horario del cliente que la observe. El tipo `date` (migración `0008_tasks_due_date.sql`) almacena una fecha civil pura. La cadena `YYYY-MM-DD` es universal e idéntica para todos los observadores.
+
+**El driver `pg` reintroducía el problema.** Por defecto, el driver `pg` convierte las columnas `DATE` de PostgreSQL (OID 1082) en instancias de `Date` de JavaScript fijadas a medianoche UTC. Al serializarse a JSON en Express mediante `JSON.stringify()`, el objeto vuelve a convertirse en un instante con zona horaria (`"2026-03-12T00:00:00.000Z"`), provocando que un cliente al oeste de UTC desplace la fecha al día anterior.
+Para resolverlo, se registró un parser de tipo de identidad en `api/src/db/pool.ts`:
+```ts
+pg.types.setTypeParser(1082, (val: string) => val);
+```
+Esto garantiza que la cadena `YYYY-MM-DD` entregada por PostgreSQL viaje intacta por HTTP. Hay una prueba de integración de ida y vuelta que blinda este comportamiento, comprobando que `2026-03-12` entra, se persiste y sale sin desplazarse.
+
+**Decisión 2: El semáforo de vencimiento se calcula en el cliente.** Representa una **excepción deliberada** al principio general del proyecto de alojar las invariantes de negocio en el motor de base de datos (ADR-004 y ADR-009).
+La justificación es técnica y física: «vencida» no es un dato de la entidad, sino **una función del momento exacto en que se consulta**.
+1. PostgreSQL prohíbe funciones no inmutables como `CURRENT_DATE` o `now()` en columnas generadas (`GENERATED ALWAYS ... AS ... STORED`).
+2. Ningún trigger relacional se ejecuta a medianoche sin escrituras concurrentes que lo disparen.
+No es que se prefiera evitar el motor: es que **técnicamente no se puede alojar en PostgreSQL sin procesos batch o demonios externos**.
+
+**Decisión 3: La ventana de aviso temprano («vence pronto») son 3 días naturales, hoy incluido.** En la discusión entre 2 y 3 días prevaleció el argumento operativo del calendario laboral: un viernes por la tarde es imprescindible que el tablero alerte de las tareas que vencen el lunes siguiente.
+
+**Decisión 4: Una tarea completada deja de alarmar.** Tenga la fecha de vencimiento que tenga, una tarjeta terminada ya no requiere acción preventiva; la insignia se atenúa a tonos neutros (`bg-canvas text-ink-muted/70`).
+El diagnóstico secundario («completada a tiempo» o «completada tarde») se muestra en el diálogo de edición y se calcula comparando **fechas civiles locales** (`localCompletedDate <= dueDate`). Realizar esta comparación en SQL mezclaría un tipo `date` con un `timestamptz` (`completed_at`), reintroduciendo el huso horario del servidor por la puerta de atrás.
+
+**Comportamiento visual y accesible.** La insignia de vencimiento se muestra **siempre que la tarea tenga fecha asignada**, no únicamente cuando está próxima a vencer o vencida. Además, el estado se comunica de forma redundante en el texto visible (`Vencida · 12 mar`, `Vence hoy · 12 mar`, `Vence pronto · 12 mar`) y en el atributo `aria-label`, respetando el criterio de accesibilidad de nunca transmitir información exclusivamente a través del color.
+
+### ADR-029 — Etiquetas normalizadas con clave foránea compuesta
+
+**Contexto.** Incorporar etiquetas a las tareas (SL-18) abre el debate clásico entre dos modelos de
+persistencia: desnormalizado con un array `text[]` e índice GIN en la propia tabla `tasks`, o
+normalizado relacional con una tabla `labels` y una tabla puente `task_labels`.
+
+Para no decidir por intuición, se construyó un banco de pruebas con **200 proyectos, 20 000 tareas y
+40 000 asignaciones**, con exactamente las mismas asignaciones en ambos modelos, verificado fila a fila.
+
+**Las mediciones, que son el argumento:**
+
+| Consulta (caché caliente) | Normalizada | Array `text[]` + GIN |
+|---|---|---|
+| Listar un proyecto con sus etiquetas | 0,897 ms | 0,143 ms |
+| Filtrar por alguna de dos etiquetas | 0,779 ms | 1,032 ms |
+| Filtrar por todas | 0,582 ms | 0,531 ms |
+| **Renombrar una etiqueta en uso** | **0,346 ms** | 1,540 ms |
+
+**Lo que hay que dejar escrito, y es lo interesante: el rendimiento NO decidió.**
+El array gana el listado por 0,75 ms y pierde el filtro por 0,25 ms. A esta escala el índice por
+proyecto (`tasks_project_id_idx`) ya reduce el conjunto de datos a ~100 filas antes de que el índice GIN
+llegue a participar. La decisión la determinaron otros dos factores incontrovertibles:
+
+1. **La integridad, que es categórica:**
+   ```
+   array:        labels || ARRAY['etiqueta fantasma']  ->  UPDATE 1     (aceptada)
+   tabla puente: label_id inexistente                   ->  ERROR 23503
+   ```
+   Un array acepta etiquetas inexistentes o eliminadas en absoluto silencio; la tabla puente garantiza
+   el rechazo atómico con `SQLSTATE 23503` en el motor de base de datos.
+
+2. **El coste de renombrar:**
+   Renombrar una etiqueta en uso cuesta **4,5 veces más con array** (1,540 ms vs 0,346 ms) **y es
+   creciente** con el número de tareas etiquetadas (obliga a escanear y actualizar cada fila de `tasks`),
+   mientras que en el modelo normalizado es siempre un único `UPDATE` en `labels` sea cual sea el volumen de uso.
+
+**La clave foránea compuesta, verificada contra el motor:**
+En un sistema multitenant o multiproyecto, una tabla puente simple `(task_id, label_id)` adolece de un
+grave defecto de integridad: una tarea del proyecto A puede recibir etiquetas del proyecto B sin que el
+motor lo detecte. Para impedirlo, se definieron restricciones únicas sobre `(id, project_id)` en `tasks` y
+`labels`, y claves foráneas compuestas en `task_labels`:
+
+```sql
+CONSTRAINT task_labels_task_fkey
+  FOREIGN KEY (task_id, project_id)
+  REFERENCES tasks (id, project_id) ON DELETE CASCADE,
+
+CONSTRAINT task_labels_label_fkey
+  FOREIGN KEY (label_id, project_id)
+  REFERENCES labels (id, project_id) ON DELETE CASCADE
+```
+
+Comprobación literal contra PostgreSQL 16:
+```
+sin ella: INSERT tarea del proyecto 77 + etiqueta del proyecto 3  ->  INSERT 0 1
+con ella: el mismo INSERT  ->  ERROR 23503
+          Key (label_id, project_id)=(3, 77) is not present in table labels
+```
+Es el mismo patrón arquitectónico de integridad que `(column_id, status) → project_columns (id, category)`
+introducido en la migración `0004` (ADR-023).
+
+**Decisión de leer las etiquetas en una segunda consulta:**
+Se evaluó cómo hidratar las etiquetas en el listado de tareas del tablero:
+
+| Enfoque | Tiempo |
+|---|---|
+| Una consulta con `LEFT JOIN` + `jsonb_agg` + `GROUP BY` | 1,429 ms |
+| Dos consultas: `LIST_QUERY` intacta + `WHERE task_id = ANY(...)` | **0,867 ms** |
+
+Lo importante no es únicamente el medio milisegundo de diferencia: al utilizar dos consultas,
+**`LIST_QUERY` no se toca**, la compleja escalera de `CASE` de ordenación de ADR-024 queda completamente
+intacta y **desaparece por construcción el riesgo de que el join multiplique filas**.
+*Salvedad honesta:* son dos viajes de ida y vuelta a la base de datos; con PostgreSQL y la API en la misma
+red Docker la latencia es despreciable (~0,1 ms), pero habría que volver a medirlo si la base residiera
+en una red remota con alta latencia.
+
+**El filtro sí toca `LIST_QUERY`:**
+El filtro por etiquetas (`filtros.labels`) requiere acotar las tareas devueltas. Se implementa con
+`EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = ANY($5))` **estrictamente
+dentro de la cláusula `ON` del `LEFT JOIN`, nunca en el `WHERE`**. Si se colocara en el `WHERE`, un proyecto
+existente que no tuviese tareas con esas etiquetas perdería la fila del proyecto en el resultado, y la API
+respondería un `404 Not Found` falso en lugar del array vacío `[]` con `200 OK` (ADR-016).
+
+**Alternativas descartadas:**
+1. **Array `text[]` con índice GIN:** Descartada por falta de integridad referencial, aceptación de
+   etiquetas huérfanas y coste cuadrático al renombrar etiquetas populares.
+2. **Tabla puente simple sin clave foránea compuesta:** Descartada porque permite asignaciones cruzadas
+   de etiquetas entre proyectos diferentes, violando el aislamiento por proyecto en el motor.
+
+---
+
+### ADR-030 — Una etiqueta es configuración del proyecto, no contenido
+
+**Contexto.** Este ADR nace de un **defecto real** que encontró la prueba E2E (`e2e/etiquetas.spec.ts`)
+durante el desarrollo de SL-18.
+
+La migración inicial `0009_etiquetas.sql` declaró `labels.project_id ... ON DELETE RESTRICT`, copiando por
+inercia lo que hace `tasks`. Consecuencia inmediata: al borrar un proyecto que tenía una etiqueta creada
+y **ninguna tarea**, la API respondía con **`HTTP 500 INTERNAL_ERROR`**, en lugar de un 204 exitoso o un 409 explicado.
+
+El 500 se producía porque el middleware y los repositorios (`pg-error.ts`) solo reconocen y traducen el
+`23503` proveniente de `tasks_project_id_fkey`. La foránea de `labels` abrió un tercer camino de violación
+de integridad referencial que nadie capturaba, cayendo al manejador genérico de 500.
+
+**Traducir ese tercer `23503` habría sido tapar el síntoma.** El verdadero problema era que la regla de
+integridad estaba conceptualmente mal elegida. El repositorio ya distinguía de manera explícita las dos
+naturalezas de entidades que cuelgan de un proyecto:
+
+| Entidad | Regla | Naturaleza y justificación |
+|---|---|---|
+| `tasks` | `ON DELETE RESTRICT` | **Contenido del usuario;** el 409 lo protege contra pérdida accidental y ofrece salida explícita. |
+| `project_columns` | `ON DELETE CASCADE` | **Configuración del tablero;** no tiene significado ni existencia fuera del proyecto. |
+
+Una etiqueta pertenece inequívocamente a la segunda naturaleza: es configuración del tablero, vive dentro
+del espacio de nombres del proyecto y no significa nada fuera de él. Conservar una etiqueta tras eliminar el
+proyecto dejaría filas huérfanas inaccesibles.
+
+**Decisión.** La migración `0010_etiquetas_cascada_al_borrar_proyecto.sql` modifica la clave foránea a
+`ON DELETE CASCADE`.
+
+**Verificación:**
+1. Borrar un proyecto con etiquetas y 0 tareas devuelve `204 No Content` y limpia las etiquetas sin dejar
+   filas huérfanas.
+2. **El 409 de tareas permanece rigurosamente intacto:** si el proyecto contiene tareas (etiquetadas o no),
+   la base dispara la restricción `tasks_project_id_fkey` con `ON DELETE RESTRICT`, la API responde
+   `409 PROJECT_HAS_TASKS`, las tareas continúan vivas e intactas, y tras eliminarlas explícitamente, el
+   proyecto se borra con 204 llevándose sus etiquetas.
+
+Hay una prueba de regresión específica en `api/tests/integration/projects.test.ts` que fija permanentemente
+este comportamiento.
+
+## 4. Stack final
+
+| Capa | Elección | Versión |
+|---|---|---|
+| Lenguaje | TypeScript `strict` | 5.x |
+| Backend | Node + Express | 22 LTS / 4.x |
+| Validación | Zod | 3.x |
+| Datos | `pg` + patrón repositorio | 8.x |
+| Migraciones | `node-pg-migrate` (`--no-single-transaction`) | 7.x |
+| Base de datos | PostgreSQL | 16 |
+| Frontend | React + Vite | 18.x / 5.x |
+| Estado de servidor | TanStack Query | 5.x |
+| Estilos | Tailwind CSS + lucide-react | 4.x |
+| Enrutado | propio, sobre la History API | — |
+| Modales | elemento nativo `<dialog>` | — |
+| Arrastre | `@dnd-kit/core` + `@dnd-kit/sortable` (ADR-021, ADR-025) | 6.3.1 / 10.0.0 |
+| Pruebas | Vitest + Supertest | — |
+| E2E | Playwright (15 escenarios) | — |
+| CI | GitHub Actions | — |
+| Gates | `sistema-multiagente-sdlc` (`quality-gate`, `coverage-diff`) | 2.2.2 |
+| Gestor de paquetes | npm | 10.x |
+
+
+
+---
+
+### ADR-031 — Tema claro/oscuro con seis redefiniciones estructurales y derivación con color-mix
+
+**Contexto.** La plataforma requería un modo oscuro ergonómico para reducir la fatiga visual de los operadores en turnos nocturnos o salas de control. Una propuesta inicial (Codex) planteaba redefinir de manera exhaustiva los 45 tokens semánticos de la aplicación en el bloque `.dark`. Por el contrario, otra propuesta (Antigravity) sugería derivar automáticamente todas las variables aplicando `color-mix` únicamente sobre el fondo `--color-surface`.
+
+**Alternativas descartadas.**
+1. *Redefinir 45 variables CSS individuales:* Genera sobreingeniería, inflación de la hoja de estilos y alto riesgo de inconsistencias ante la adición de nuevas insignias o colores semánticos en el futuro.
+2. *Derivar únicamente el fondo con `color-mix`:* **Se midió en laboratorio y falló.** Los tonos base originales de las insignias (`--base-priority-*`, `--base-status-*`, `--base-label-*`) fueron elegidos con luminancia calibrada como texto oscuro sobre fondo claro. Al situarlos sobre fondos oscurecidos con `color-mix`, **fallaron los 18 pares de contraste WCAG 2.1 AA** (ratios inaceptables de 1,99:1 a 2,85:1).
+
+**Decisión.** Se adoptó un enfoque híbrido medido que aprueba el 100% de los pares con un ratio mínimo de 5,85:1 (superando ampliamente el umbral 4,5:1 de WCAG):
+- Se redefinen **exclusivamente seis tokens estructurales** en `[data-theme="dark"]` (`--color-surface`, `--color-canvas`, `--color-border`, `--color-ink`, `--color-ink-muted`, `--color-brand`).
+- Las insignias semánticas (prioridades, estados y etiquetas) derivan su fondo al 18% sobre `--color-surface` y **aclaran su texto al 50% con blanco** mediante `color-mix(in srgb, white 50%, var(--base-...))`.
+- La preferencia de tema es individual y se almacena en `localStorage` con sincronización a `prefers-color-scheme`.
+
+---
+
+### ADR-032 — Fondo de tablero como identidad compartida en PostgreSQL frente a tema como preferencia de navegador
+
+**Contexto.** Cada iniciativa técnica (peajes, parqueaderos, conciliaciones) requería diferenciación visual inmediata para evitar que los operadores ejecuten acciones sobre el tablero equivocado. Se requería determinar dónde y cómo persistir el fondo ambiental del tablero.
+
+**Alternativas descartadas.**
+1. *Almacenar el fondo en `localStorage`:* Descartado categóricamente. El fondo del tablero es una propiedad de identidad compartida del equipo (al igual que las columnas o los límites de WIP). Si residiera en el navegador local, dos operadores analizando el mismo proyecto verían fondos distintos, rompiendo la referencia visual común en reuniones de seguimiento.
+2. *Fondos con imágenes arbitrarias vía Unsplash o subida de archivos:* Descartado. Introduce latencia de red, claves de API externas susceptibles de expirar, problemas de atribución de derechos de autor y riesgos críticos de ilegibilidad si la imagen subida carece de contraste controlado.
+
+**Decisión.**
+- El fondo ambiental vive en PostgreSQL en la columna `projects.background text NOT NULL DEFAULT 'neutro'`.
+- La integridad se impone en el motor mediante `CONSTRAINT projects_background_check CHECK (background IN ('neutro', 'azul', 'verde', 'ambar', 'purpura', 'rosa'))`.
+- Las tarjetas e insignias mantienen superficies opacas (`--color-surface`), garantizando legibilidad y aislamiento cromático total respecto al fondo ambiental del contenedor.
+
+---
+
+### ADR-033 — Detector de colisiones compuesto en dos fases para resolver tarjeta y columna en el arrastre
+
+**Contexto.** Durante la interacción de arrastre entre columnas (SL-20), se observó que la biblioteca `@dnd-kit` no permitía insertar tarjetas en posiciones relativas precisas entre columnas distintas: al soltar sobre otra columna, la tarjeta caía invariablemente al final de la lista con posición `MAX + 1024` en lugar de respetar la posición intermedia deseada.
+
+**Alternativas descartadas.**
+1. *Algoritmo estándar `closestCenter`:* Descartado tras medir su comportamiento geométrico. `closestCenter` compara distancias entre centros de rectángulos delimitadores globales. Dado que las columnas poseen un área geométrica masiva en comparación con las tarjetas individuales, el centroide de la columna destino vencía siempre al de las tarjetas adyacentes, resolviendo `over.id` a la columna y evitando que el manejador `onDragEnd` recibiera el identificador de la tarjeta vecina.
+2. *Algoritmo `rectIntersection`:* Descartado por comportamiento errático en los bordes superiores e inferiores de las columnas cuando el puntero del ratón o toque táctil supera los límites del contenedor.
+
+**Decisión.** Se diseñó un detector de colisiones compuesto en dos fases (`crearDetectorCompuesto` en `TaskBoard.tsx`):
+1. **Fase 1 (Resolución de Columna):** Se utiliza `pointerWithin` para identificar la columna exacta que contiene las coordenadas físicas del puntero.
+2. **Fase 2 (Resolución de Tarjeta Local):** Una vez identificada la columna activa, se restringe la búsqueda de colisiones exclusivamente a los contenedores sortables (`TaskCard`) de dicha columna mediante `closestCorners`.
+3. Esto garantiza que `over.id` resuelva a la tarjeta vecina exacta, habilitando el cálculo de punto medio `(prev + next) / 2` y renderizando la línea indicadora de inserción visual a 60 FPS estables.
+
+---
+
+### ADR-034 — Edición en el sitio del nombre de columna con botón conmutado y aria-label accesible (WCAG 2.5.3)
+
+**Contexto.** Los usuarios requerían renombrar columnas directamente desde el tablero (SL-21) sin verse obligados a navegar al diálogo modal de administración de columnas.
+
+**Alternativas descartadas.**
+1. *Atributo nativo `contenteditable`:* Descartado. `contenteditable` altera el Virtual DOM de React, inyecta etiquetas HTML no deseadas (`<br>`, `<div>`), produce saltos de foco y complica la sincronización bidireccional con el estado.
+2. *Elemento `<input type="text">` permanente:* Descartado. Sustituir permanentemente el encabezado por un campo de texto elimina los hitos semánticos `<h3>` en el árbol de accesibilidad, perjudicando a usuarios de tecnologías de asistencia que navegan por encabezados.
+3. *Nombre accesible apoyado en `title`:* **Se midió y resultó falso.** Según el algoritmo de Accessible Name and Description Computation del W3C, el texto visible dentro de un botón **prevalece sobre el atributo `title`**. Un botón con `title="Renombrar columna Por hacer"` pero con texto «Por hacer» es anunciado por el lector como «Por hacer, botón», omitiendo por completo el propósito de la acción.
+
+**Decisión.**
+- El componente `TituloColumnaEditable` renderiza en reposo un encabezado `<h3>` con un botón accesible estilizado (`text-left truncate`).
+- El botón porta explícitamente `aria-label="Renombrar columna [Nombre]"`, cumpliendo WCAG 2.5.3 (Label in Name) al incluir el texto visible dentro del nombre accesible.
+- Al pulsar, conmuta a un `<input type="text">` con selección automática del texto (`select()`).
+- Se persiste en `Enter` o `blur` con reversión defensiva ante valor vacío o inalterado, y `Escape` restaura el valor original devolviendo el foco programático al botón contenedor.
+
+### ADR-035 — La plantilla de límites la aplica el repositorio en transacción, no el trigger
+
+**Contexto.** Los límites de trabajo en curso existían desde SL-12 y vivían por columna desde ADR-023, pero su único punto de configuración era un campo dentro del diálogo «Columnas». El problema medido no era de arquitectura sino de descubribilidad: un proyecto nuevo nace **sin ningún límite** —el trigger `projects_create_default_columns` crea las tres columnas con `wip_limit` a NULL, y el `2` que aparecía en la demostración lo ponía solo el seed—, y quien quería poner uno no encontraba dónde. SL-22 añade dos superficies más: una plantilla al crear el proyecto y los límites por columna al editarlo.
+
+Al crear, las columnas todavía no existen. Pedir un número por columna sería pedirlo para columnas sin nombre, así que la superficie de creación ofrece una intención —«sin límites» o «flujo controlado»— y algo tiene que traducirla a `UPDATE`s sobre las columnas que acaba de crear el trigger.
+
+**Alternativas descartadas.**
+
+1. *Que el trigger acepte la plantilla.* Es la más fuerte de las descartadas, porque mantiene toda escritura en el motor y ese criterio ya justificó el propio trigger y el que sella `completed_at`. Se descarta porque un trigger `AFTER INSERT ... FOR EACH ROW` solo ve la fila de `projects`: para conocer la plantilla haría falta una columna `projects.wip_template` viva únicamente durante el `INSERT` y muerta después. Es **exactamente** el defecto que la migración `0003` corrigió al eliminar `projects.wip_limit`, con estas palabras: «dos sitios donde declarar la misma cosa: un campo que solo surte efecto al crear el proyecto y que después nadie puede cambiar». La variante con `current_setting` evita la columna pero acopla el comportamiento del trigger al pool de `pg`, es propensa a fugas de contexto entre reusos de conexión, y resulta invisible para el seed y para `psql`, que es justo lo que justifica que el trigger exista.
+2. *Un endpoint aparte que el cliente llame tras crear.* Descartado por dejar una ventana real en la que el proyecto existe sin plantilla, por trasladar al cliente HTTP la responsabilidad de completar el estado inicial, y por permitir que la omita.
+3. *Un motor genérico de reglas* con `rule_type`/`rule_value`/`scope`. Descartado por separado por los dos revisores en dos sesiones distintas: añade migraciones, joins y complejidad para resolver lo que es un problema de rótulos. Además, solo el límite de trabajo en curso es defendible: sin usuarios no hay límites por persona, y un máximo por proyecto o por etiqueta no responde a ninguna práctica ágil.
+
+**Decisión.** La plantilla la aplica `createProject` en el repositorio, dentro de una sola transacción: `BEGIN`, `INSERT INTO projects` —que dispara el trigger y crea el tablero—, `UPDATE project_columns SET wip_limit = $2 WHERE project_id = $1 AND category = 'IN_PROGRESS'`, `COMMIT`.
+
+El razonamiento que lo permite: **«flujo controlado» es un valor por defecto de producto, no una invariante del dominio**. Codex y Antigravity coincidieron en ello por separado. Las invariantes siguen donde estaban y las sigue defendiendo el motor: el trigger garantiza que todo proyecto nace con su tablero, el `CHECK project_columns_wip_positive` que un límite es válido, y el `CHECK project_columns_done_has_no_wip` que una columna terminal no admite ninguno. Lo que se añade es una preferencia inicial que quien la recibe puede cambiar o quitar al momento, y hay una prueba que fija precisamente eso.
+
+**El `UPDATE` alcanza a todas las columnas `IN_PROGRESS`, no solo a la primera.** Fue el único punto en que los dos revisores discreparon. Se midió: hoy el trigger crea exactamente una columna de esa categoría, así que ambos predicados son indistinguibles y el resultado no desempata. Decide la coherencia con ADR-023, que puso el límite por columna precisamente para que «Desarrollo máximo 3» y «QA máximo 2» convivan; con «solo la primera», una segunda columna `IN_PROGRESS` nacería sin límite y el trabajo se escaparía por ella.
+
+**Dos guardas exigidas por la revisión.** Si el `UPDATE` afecta a cero filas se aborta la creación entera: significaría que el tablero por defecto dejó de tener columna de trabajo en curso, y el proyecto nacería mintiendo sobre su configuración. Y `client.release()` va en `finally`: sin él, pasar de `pool.query` a `pool.connect()` filtra conexiones en silencio y el servidor deja de responder tras unas pocas creaciones.
+
+**El número es 2, y es decisión de producto.** No hay ninguna regla del dominio que lo derive; se fija como constante con nombre —`LIMITE_FLUJO_CONTROLADO`— para que cambiarla sea una decisión y no una búsqueda por el código. Se eligió por coherencia con los datos de ejemplo, que ya usaban 2.
