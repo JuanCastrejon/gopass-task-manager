@@ -74,13 +74,11 @@ Crear proyectos, asociarles tareas con estado y prioridad, y ver el trabajo de f
 
 ## Vídeo de demostración
 
-El límite de trabajo en curso, puesto desde «Editar proyecto» y haciéndose cumplir en el tablero:
+Recorrido completo con locución, 2 min 48 s. Añade una columna y la renombra desde su propia cabecera, configura el límite de trabajo en curso desde «Editar proyecto» y lo agota hasta que el tablero rechaza la tercera tarjeta, muestra el contrato publicado en Swagger, y termina con el conflicto que devuelve la base al intentar borrar un proyecto que todavía tiene tareas.
 
-![Se abre «Editar proyecto», se pone un límite de 2 en la columna «En curso», y al intentar mover una tercera tarjeta el tablero la rechaza explicando el motivo](docs/assets/demo.gif)
+https://github.com/user-attachments/assets/065c7ebb-048b-4fb7-903d-4e5d1268e576
 
-**El recorrido completo, con locución, dura 2 min 48 s:** [docs/assets/demo.mp4](docs/assets/demo.mp4) — o descargable desde la [release v1.0.0](https://github.com/JuanCastrejon/gopass-task-manager/releases/tag/v1.0.0). Añade una columna y la renombra desde su cabecera, configura y agota el límite, muestra el contrato publicado en Swagger, y termina con el conflicto que devuelve la base al intentar borrar un proyecto que todavía tiene tareas.
-
-Ambos archivos viven en el repositorio a propósito: la entrega no depende de ningún servicio externo que pueda caducar o cambiar de permisos. El fragmento va en GIF porque **GitHub solo reproduce en línea los vídeos subidos a su propio almacén**; un MP4 referenciado desde el árbol se sirve como descarga, y una etiqueta `<video>` la elimina el saneado de Markdown. Comprobado contra la API de renderizado antes de decidirlo.
+El mismo archivo vive también en el repositorio, en [docs/assets/demo.mp4](docs/assets/demo.mp4), y adjunto a la [release v1.0.0](https://github.com/JuanCastrejon/gopass-task-manager/releases/tag/v1.0.0). El reproductor de arriba depende del almacén de adjuntos de GitHub; el archivo del árbol no depende de nada.
 
 ## Cinco decisiones que definen este proyecto
 
