@@ -13,6 +13,7 @@ reports/
 playwright-report/
 test-results/
 .sdlc/backups/
+memory/
 
 # Evidencia advisory de corridas locales del quality gate.
 # La evidencia autoritativa la produce CI, no el equipo local.
